@@ -1,5 +1,7 @@
 # TASK
 
+{{IMPLEMENT_PREAMBLE}}
+
 Fix issue {{TASK_ID}}: {{ISSUE_TITLE}}
 
 Pull in the issue using `{{VIEW_TASK_COMMAND}}`. If it has a parent PRD, pull that in too.

@@ -404,6 +404,151 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("<promise>COMPLETE</promise>");
   });
 
+  it("substitutes {{PREAMBLE}} as empty string when backlog manager has no preamble", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("{{PREAMBLE}}");
+  });
+
+  it("simple-loop scaffolded with jira injects the JIRA single-stage preamble", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      backlogManager: getBacklogManager("jira"),
+    });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("{{PREAMBLE}}");
+    expect(prompt).toContain("JIRA pickup discipline (single-stage loop)");
+    expect(prompt).toContain("jira-transition.py <ID> 2");
+  });
+
+  it("scaffolding with jira copies the _vendor tree into .sandcastle/_vendor/", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      backlogManager: getBacklogManager("jira"),
+    });
+
+    const { access } = await import("node:fs/promises");
+    const vendorBase = join(
+      dir,
+      ".sandcastle",
+      "_vendor",
+      "jira-plugin-3.10.1",
+    );
+    for (const rel of [
+      "skills/jira-communication/scripts/core/jira-pickup",
+      "skills/jira-communication/scripts/core/jira_pickup_lib.py",
+      "skills/jira-communication/scripts/core/jira-search.py",
+      "skills/jira-communication/scripts/utility/jira-worklog-query.py",
+    ]) {
+      await expect(access(join(vendorBase, rel))).resolves.toBeUndefined();
+    }
+  });
+
+  it("parallel-planner-with-review with jira renders the right preamble in each stage", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "parallel-planner-with-review",
+      backlogManager: getBacklogManager("jira"),
+    });
+
+    const plan = await readFile(
+      join(dir, ".sandcastle", "plan-prompt.md"),
+      "utf-8",
+    );
+    const impl = await readFile(
+      join(dir, ".sandcastle", "implement-prompt.md"),
+      "utf-8",
+    );
+    const merge = await readFile(
+      join(dir, ".sandcastle", "merge-prompt.md"),
+      "utf-8",
+    );
+    const review = await readFile(
+      join(dir, ".sandcastle", "review-prompt.md"),
+      "utf-8",
+    );
+
+    expect(plan).toContain("JIRA pickup discipline (plan stage)");
+    expect(impl).toContain("JIRA pickup discipline (implement stage)");
+    expect(merge).toContain("JIRA pickup discipline (merge stage)");
+    // Review stage is read-only re: JIRA — we don't add a preamble here,
+    // so the file must not contain a leftover {{*_PREAMBLE}} placeholder either.
+    expect(review).not.toMatch(/\{\{(PLAN_|IMPLEMENT_|MERGE_)?PREAMBLE\}\}/);
+    for (const p of [plan, impl, merge]) {
+      expect(p).not.toMatch(/\{\{(PLAN_|IMPLEMENT_|MERGE_)?PREAMBLE\}\}/);
+    }
+  });
+
+  it("parallel-planner with jira renders the right preamble in each stage", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "parallel-planner",
+      backlogManager: getBacklogManager("jira"),
+    });
+
+    const plan = await readFile(
+      join(dir, ".sandcastle", "plan-prompt.md"),
+      "utf-8",
+    );
+    const impl = await readFile(
+      join(dir, ".sandcastle", "implement-prompt.md"),
+      "utf-8",
+    );
+    const merge = await readFile(
+      join(dir, ".sandcastle", "merge-prompt.md"),
+      "utf-8",
+    );
+
+    expect(plan).toContain("JIRA pickup discipline (plan stage)");
+    expect(impl).toContain("JIRA pickup discipline (implement stage)");
+    expect(merge).toContain("JIRA pickup discipline (merge stage)");
+    for (const p of [plan, impl, merge]) {
+      expect(p).not.toMatch(/\{\{(PLAN_|IMPLEMENT_|MERGE_)?PREAMBLE\}\}/);
+    }
+  });
+
+  it("sequential-reviewer with jira renders single-stage preamble in implement-prompt", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "sequential-reviewer",
+      backlogManager: getBacklogManager("jira"),
+    });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "implement-prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("{{PREAMBLE}}");
+    expect(prompt).toContain("JIRA pickup discipline (single-stage loop)");
+  });
+
+  it("scaffolding with github-issues does NOT copy the jira _vendor tree", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const { access } = await import("node:fs/promises");
+    await expect(
+      access(join(dir, ".sandcastle", "_vendor", "jira-plugin-3.10.1")),
+    ).rejects.toThrow();
+  });
+
   describe("sequential-reviewer template", () => {
     it("produces main.mts, implement-prompt.md, and review-prompt.md", async () => {
       const dir = await makeDir();
@@ -1191,6 +1336,57 @@ describe("InitService scaffold", () => {
 
     it("getBacklogManager returns undefined for unknown manager", () => {
       expect(getBacklogManager("nonexistent")).toBeUndefined();
+    });
+
+    it("listBacklogManagers includes jira", () => {
+      const managers = listBacklogManagers();
+      expect(managers.some((m) => m.name === "jira")).toBe(true);
+    });
+
+    it("getBacklogManager('jira') returns an entry labelled JIRA", () => {
+      const manager = getBacklogManager("jira");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("JIRA");
+    });
+
+    it("jira BACKLOG_MANAGER_TOOLS installs uv and clones the plugin at v3.10.1", () => {
+      const tools =
+        getBacklogManager("jira")!.templateArgs.BACKLOG_MANAGER_TOOLS;
+      expect(tools).toContain("astral.sh/uv/install.sh");
+      expect(tools).toContain("git clone --branch v3.10.1");
+      expect(tools).toContain("github.com/netresearch/jira-skill");
+      // overlay step
+      // Build context is .sandcastle/, so COPY paths are relative to it
+      expect(tools).toContain(
+        "_vendor/jira-plugin-3.10.1/skills/jira-communication/scripts/core/jira-pickup",
+      );
+      expect(tools).toContain(
+        "_vendor/jira-plugin-3.10.1/skills/jira-communication/scripts/core/jira-search.py",
+      );
+      expect(tools).not.toContain(".sandcastle/_vendor/jira-plugin-3.10.1");
+    });
+
+    it("jira envExample declares the three required env vars", () => {
+      const env = getBacklogManager("jira")!.envExample;
+      expect(env).toContain("JIRA_URL");
+      expect(env).toContain("JIRA_EMAIL");
+      expect(env).toContain("JIRA_API_TOKEN");
+    });
+
+    it("jira CLOSE_TASK_COMMAND wires to Submit-for-review (transition id 3)", () => {
+      const cmd = getBacklogManager("jira")!.templateArgs.CLOSE_TASK_COMMAND;
+      expect(cmd).toBe("jira-transition.py <ID> 3");
+    });
+
+    it("jira LIST_TASKS_COMMAND is the bare jira-pickup binary", () => {
+      const cmd = getBacklogManager("jira")!.templateArgs.LIST_TASKS_COMMAND;
+      expect(cmd).toBe("jira-pickup");
+    });
+
+    it("jira preambles forbid JIRA writes from the merge stage", () => {
+      const merge = getBacklogManager("jira")!.templateArgs.MERGE_PREAMBLE;
+      expect(merge.toLowerCase()).toContain("must not write");
+      expect(merge.toLowerCase()).toContain("forbidden");
     });
   });
 

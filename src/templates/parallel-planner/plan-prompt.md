@@ -10,6 +10,8 @@ Here are the open issues in the repo:
 
 # TASK
 
+{{PLAN_PREAMBLE}}
+
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
 
 An issue B is **blocked by** issue A if:

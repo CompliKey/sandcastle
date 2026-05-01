@@ -1,5 +1,7 @@
 # TASK
 
+{{MERGE_PREAMBLE}}
+
 Merge the following branches into the current branch:
 
 {{BRANCHES}}

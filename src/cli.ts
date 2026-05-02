@@ -31,6 +31,7 @@ import type {
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
+import { loadScenarioConfig } from "./ScenarioConfigLoader.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -460,6 +461,62 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+// --- Scenarios commands ---
+
+const DEFAULT_CONFIG_PATH = ".sandcastle/main.ts";
+
+const scenariosConfigOption = Options.file("config").pipe(
+  Options.withDescription(
+    `Path to the sandcastle config (default: ${DEFAULT_CONFIG_PATH})`,
+  ),
+  Options.optional,
+);
+
+const scenariosListCommand = Command.make(
+  "list",
+  { config: scenariosConfigOption },
+  ({ config }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const configPath =
+        config._tag === "Some" ? config.value : join(cwd, DEFAULT_CONFIG_PATH);
+
+      const metadata = yield* loadScenarioConfig(configPath);
+
+      if (metadata.scenarios.length === 0) {
+        // Loader rejects empty `scenarios` already; this is belt-and-braces.
+        yield* d.status("No scenarios defined.", "info");
+        return;
+      }
+
+      yield* d.text(
+        styleText("bold", `Scenarios (${metadata.scenarios.length}):`),
+      );
+      for (const scenario of metadata.scenarios) {
+        yield* d.text(
+          `  ${styleText("cyan", scenario.name)}  ${styleText(
+            "dim",
+            `input: ${scenario.input.type}`,
+          )}`,
+        );
+        if (scenario.description !== undefined) {
+          yield* d.text(`    ${styleText("dim", scenario.description)}`);
+        }
+      }
+    }),
+);
+
+const scenariosCommand = Command.make("scenarios", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Scenario commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([scenariosListCommand]));
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -471,7 +528,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    dockerCommand,
+    podmanCommand,
+    scenariosCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {

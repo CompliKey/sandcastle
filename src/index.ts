@@ -42,6 +42,23 @@ export {
   sessionPathsLayer,
   defaultSessionPathsLayer,
 } from "./SessionPaths.js";
+export { defineSandcastle, isSandcastleConfig } from "./defineSandcastle.js";
+export type {
+  BacklogManager,
+  SandcastleConfig,
+  SandcastleConfigInput,
+  ScenarioContext,
+  ScenarioDefinition,
+  ScenarioInput,
+  ScenarioLogFn,
+  ScenarioTicket,
+  SingleTicketInput,
+} from "./defineSandcastle.js";
+export { loadScenarioConfig } from "./ScenarioConfigLoader.js";
+export type {
+  ScenarioMetadata,
+  SandcastleConfigMetadata,
+} from "./ScenarioConfigLoader.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
 export { CwdError } from "./resolveCwd.js";

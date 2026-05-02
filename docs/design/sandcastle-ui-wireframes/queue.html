@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Queue — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ================ App nav ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link">Live</a>
+          <a href="queue.html" class="app-nav__link" aria-current="page">Queue</a>
+          <a href="history.html" class="app-nav__link">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+
+      <!-- ================ Page ================ -->
+      <main class="list-page">
+        <header class="list-page__header">
+          <div>
+            <h1 class="list-page__title">Queue</h1>
+            <p class="list-page__sub">
+              Tickets in <code>To Do</code> on JIRA project <code>VGD</code>, in the order autopilot will pick them up.
+              Tickets labelled <code>agent-error</code> are excluded.
+            </p>
+          </div>
+          <div class="list-page__actions">
+            <button type="button" class="btn btn--ghost">↻ Refresh</button>
+          </div>
+        </header>
+
+        <!-- Filter bar -->
+        <div class="filter-bar" role="search">
+          <span aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            class="filter-bar__search"
+            placeholder="Filter by ticket id, title, or label…"
+          />
+          <span class="filter-bar__divider"></span>
+          <button type="button" class="filter-chip" aria-pressed="true">All <span class="badge">14</span></button>
+          <button type="button" class="filter-chip" aria-pressed="false">High priority <span class="badge">3</span></button>
+          <span class="filter-bar__divider"></span>
+          <button type="button" class="filter-chip">Sort: pickup order ▾</button>
+        </div>
+
+        <!-- Queue list -->
+        <section class="session-list" aria-label="Queue">
+          <header class="queue-list__head" role="row">
+            <span>#</span>
+            <span>Ticket</span>
+            <span>Labels</span>
+            <span>Priority</span>
+            <span>Created</span>
+            <span></span>
+          </header>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order queue-row__order--next">1</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-130</span>
+              <span class="session-row__title">Add OAuth PKCE flow to login app</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">auth</span>
+              <span class="label-chip">apps/login</span>
+            </span>
+            <span class="queue-row__priority queue-row__priority--high">▲ High</span>
+            <span class="queue-row__created">2026-05-02 09:14</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">2</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-131</span>
+              <span class="session-row__title">Wire RLS policy for app_users.last_seen_at</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">db</span>
+              <span class="label-chip">rls</span>
+            </span>
+            <span class="queue-row__priority">◆ Medium</span>
+            <span class="queue-row__created">2026-05-02 08:42</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">3</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-129</span>
+              <span class="session-row__title">Drizzle migration: orgs.eu_residency boolean</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">db</span>
+              <span class="label-chip">eu-sovereignty</span>
+            </span>
+            <span class="queue-row__priority">◆ Medium</span>
+            <span class="queue-row__created">2026-05-01 22:18</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">4</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-134</span>
+              <span class="session-row__title">Per-session token budget enforcement</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">sandcastle-repo</span>
+            </span>
+            <span class="queue-row__priority">◆ Medium</span>
+            <span class="queue-row__created">2026-05-01 17:55</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">5</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-135</span>
+              <span class="session-row__title">Caddy: per-app wildcard for *.app.staging.complikey.dev</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">infra</span>
+              <span class="label-chip">caddy</span>
+            </span>
+            <span class="queue-row__priority queue-row__priority--high">▲ High</span>
+            <span class="queue-row__created">2026-05-01 14:02</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">6</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-136</span>
+              <span class="session-row__title">Audit logger: emit pseudonymisation event on erasure</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">gdpr</span>
+              <span class="label-chip">logging</span>
+            </span>
+            <span class="queue-row__priority">◆ Medium</span>
+            <span class="queue-row__created">2026-05-01 11:30</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+
+          <div class="queue-row" role="row">
+            <span class="queue-row__order">7</span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-137</span>
+              <span class="session-row__title">Refactor SessionStore to share JSONL append helper with EventStore</span>
+            </span>
+            <span class="queue-row__labels">
+              <span class="label-chip">sandcastle-repo</span>
+              <span class="label-chip">refactor</span>
+            </span>
+            <span class="queue-row__priority">▽ Low</span>
+            <span class="queue-row__created">2026-04-30 19:48</span>
+            <span class="queue-row__actions">
+              <button type="button" class="btn btn--ghost">Run with overrides…</button>
+              <button type="button" class="btn btn--primary">▶ Run now</button>
+            </span>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

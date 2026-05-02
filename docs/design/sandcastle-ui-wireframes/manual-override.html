@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manual override — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!--
+      Wireframe note: in the running product the override sheet opens *over*
+      the queue view, with the queue dimmed underneath. This page renders the
+      sheet in isolation so it's reviewable on its own; the dimmed queue rows
+      below give a faint sense of context.
+    -->
+    <div class="app-shell" aria-hidden="true">
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link">Live</a>
+          <a href="queue.html" class="app-nav__link" aria-current="page">Queue</a>
+          <a href="history.html" class="app-nav__link">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+      <main class="list-page">
+        <header class="list-page__header">
+          <div>
+            <h1 class="list-page__title">Queue</h1>
+          </div>
+        </header>
+      </main>
+    </div>
+
+    <!-- ================ Manual override sheet ================ -->
+    <div class="sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <section class="sheet">
+        <header class="sheet__header">
+          <div class="sheet__title-cell">
+            <h2 id="sheet-title" class="sheet__title">
+              Run <span class="session-header__ticket">VGD-130</span> with overrides
+            </h2>
+            <p class="sheet__sub">Add OAuth PKCE flow to login app</p>
+          </div>
+          <button type="button" class="sheet__close" aria-label="Close">✕</button>
+        </header>
+
+        <div class="sheet__body">
+          <div class="form-defaults-note">
+            Overrides apply only to this manual invocation. Scenario defaults in
+            <code>.sandcastle/main.ts</code> are not modified.
+          </div>
+
+          <div class="form-row">
+            <label class="form-field">
+              <span class="form-field__label">Scenario</span>
+              <select class="form-select">
+                <option>default-claude-code (current)</option>
+                <option>default-codex</option>
+                <option>verify-only</option>
+              </select>
+              <span class="form-field__hint">Named scenarios from your <code>defineSandcastle()</code> config.</span>
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Model</span>
+              <select class="form-select">
+                <option>scenario default (claude-opus-4-7)</option>
+                <option>claude-opus-4-7</option>
+                <option>claude-sonnet-4-6</option>
+                <option>claude-haiku-4-5</option>
+              </select>
+              <span class="form-field__hint">Override the model the agent provider uses for this run.</span>
+            </label>
+          </div>
+
+          <label class="form-field">
+            <span class="form-field__label">Max iterations</span>
+            <input
+              type="number"
+              class="form-input"
+              value="12"
+              min="1"
+              max="50"
+            />
+            <span class="form-field__hint">Scenario default: <code>12</code>. Hitting the cap counts as a ticket-level failure.</span>
+          </label>
+
+          <label class="form-field">
+            <span class="form-field__label">Prompt args (JSON)</span>
+            <textarea
+              class="form-textarea"
+              spellcheck="false"
+            >{
+  "focusFiles": [
+    "apps/login/src/auth/oauth-pkce.ts"
+  ],
+  "extraGuidance": "Use the existing AuthClient — do not introduce a new HTTP client."
+}</textarea>
+            <span class="form-field__hint">Free-form JSON merged into your scenario's <code>promptArgs</code>. Validated on submit.</span>
+          </label>
+        </div>
+
+        <footer class="sheet__footer">
+          <button type="button" class="btn btn--ghost">Cancel</button>
+          <button type="button" class="btn btn--primary">▶ Start run</button>
+        </footer>
+      </section>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ticket detail — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ================ App nav ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link">Live</a>
+          <a href="queue.html" class="app-nav__link">Queue</a>
+          <a href="history.html" class="app-nav__link" aria-current="page">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+
+      <!-- ================ Page ================ -->
+      <main class="list-page">
+        <header class="list-page__header">
+          <div>
+            <p class="list-page__sub" style="margin-bottom: 4px">
+              <a href="history.html">← History</a>
+            </p>
+            <h1 class="list-page__title">Ticket detail</h1>
+          </div>
+        </header>
+
+        <!-- Ticket card with aggregates -->
+        <section class="ticket-card" aria-label="Ticket summary">
+          <div class="ticket-card__top">
+            <div class="ticket-card__row">
+              <span class="ticket-card__id">VGD-109</span>
+              <span class="ticket-card__title">Idle-timeout watchdog for stuck agents</span>
+              <span class="badge badge--success">Done · last run</span>
+              <button type="button" class="btn btn--ghost">View on JIRA ↗</button>
+            </div>
+            <div class="ticket-card__meta">
+              First session: 2026-05-01 11:50 · Closed: 2026-05-01 14:33 ·
+              Time-to-close: <strong>02:43:00</strong>
+            </div>
+          </div>
+
+          <div class="ticket-aggregates" role="group" aria-label="Ticket aggregates">
+            <div class="metric">
+              <span class="metric__label">Sessions</span>
+              <span class="metric__value">2</span>
+              <span class="metric__sub">1 errored · 1 done</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Total wall time</span>
+              <span class="metric__value">32:35</span>
+              <span class="metric__sub">across all sessions</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Avg iterations</span>
+              <span class="metric__value">5.5</span>
+              <span class="metric__sub">across all sessions</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Total commits</span>
+              <span class="metric__value">5</span>
+              <span class="metric__sub">3 in last session</span>
+            </div>
+            <div class="metric">
+              <span class="metric__label">Total tokens</span>
+              <span class="metric__value">310k</span>
+              <span class="metric__sub">198k errored · 112k done</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Sessions for this ticket -->
+        <section class="session-list" aria-label="Sessions for this ticket">
+          <header class="session-list__head" role="row">
+            <span>Status</span>
+            <span>Session</span>
+            <span>Started</span>
+            <span>Duration</span>
+            <span>Iter.</span>
+            <span>Commits</span>
+            <span>Tokens</span>
+            <span></span>
+          </header>
+
+          <a href="live-session.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">Session #2</span>
+              <span class="session-row__title"><code>sess_01HZX3W7…</code> — manual rerun after retry</span>
+            </span>
+            <span class="session-row__started">2026-05-01 14:25</span>
+            <span class="session-row__num">07:33</span>
+            <span class="session-row__num">4 / 12</span>
+            <span class="session-row__num">2</span>
+            <span class="session-row__num">112k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost">Open</button>
+            </span>
+          </a>
+
+          <a href="live-session.html" class="session-row session-row--errored" role="row">
+            <span><span class="badge badge--error">✕ errored</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">Session #1</span>
+              <span class="session-row__title"><code>sess_01HZX2K1…</code> — autopilot pickup</span>
+            </span>
+            <span class="session-row__started">2026-05-01 11:50</span>
+            <span class="session-row__num">25:02</span>
+            <span class="session-row__num">7 / 12</span>
+            <span class="session-row__num">3</span>
+            <span class="session-row__num">198k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--primary">↻ Retry</button>
+            </span>
+            <span class="session-row__error-detail">
+              <strong>idle timeout</strong> · no agent output for 10:00 · cleared by manual rerun
+            </span>
+          </a>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

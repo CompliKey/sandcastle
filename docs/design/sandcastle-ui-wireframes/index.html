@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sandcastle ui — wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="page page--index">
+    <header class="page-header">
+      <h1>sandcastle ui — wireframes</h1>
+      <p class="page-header__sub">
+        Flat HTML stubs for the v1 surface. Review artefacts, not production code.
+        Component library locked in: <strong>Radix UI</strong>. Build tool: <strong>Vite</strong>.
+      </p>
+    </header>
+
+    <main class="index-grid">
+      <a href="live-session.html" class="index-card">
+        <div class="index-card__title">Live session view</div>
+        <div class="index-card__desc">
+          Iteration timeline, tool-call cards (collapsed + expanded), live metrics row, commit sidebar.
+          Includes autopilot-ON state and config-changed badge.
+        </div>
+      </a>
+
+      <a href="live-session-halted.html" class="index-card">
+        <div class="index-card__title">Live session — halted</div>
+        <div class="index-card__desc">
+          Same chrome, halted state: autopilot OFF, halt banner with Resume,
+          errored final session header, retry CTA, hit-max-iterations failure detail.
+        </div>
+      </a>
+
+      <a href="live-session-diff.html" class="index-card">
+        <div class="index-card__title">File diff viewer</div>
+        <div class="index-card__desc">
+          Per-commit file tree on the left, side-by-side diff pane with unified toggle.
+          Linked from any file in the commit sidebar.
+        </div>
+      </a>
+
+      <a href="queue.html" class="index-card">
+        <div class="index-card__title">Queue view</div>
+        <div class="index-card__desc">
+          JIRA TODO list in autopilot pickup order, label chips, "Run now" / "Run with overrides…" per row.
+        </div>
+      </a>
+
+      <a href="manual-override.html" class="index-card">
+        <div class="index-card__title">Manual-mode override sheet</div>
+        <div class="index-card__desc">
+          Modal sheet over the queue: scenario, model, max iterations, freeform <code>promptArgs</code> JSON.
+          Overrides apply only to this invocation.
+        </div>
+      </a>
+
+      <a href="history.html" class="index-card">
+        <div class="index-card__title">History list</div>
+        <div class="index-card__desc">
+          Ticket-bounded sessions with outcome badges (done / errored / halted),
+          per-row metrics, inline error detail, retry CTA on failed rows, status filter chips.
+        </div>
+      </a>
+
+      <a href="ticket-detail.html" class="index-card">
+        <div class="index-card__title">Ticket detail</div>
+        <div class="index-card__desc">
+          Per-ticket aggregates (sessions, total wall time, avg iterations, total commits, total tokens) +
+          every session for that ticket.
+        </div>
+      </a>
+    </main>
+  </body>
+</html>

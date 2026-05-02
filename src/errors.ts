@@ -59,6 +59,13 @@ export class InitError extends Data.TaggedError("InitError")<{
   readonly message: string;
 }> {}
 
+/** Loading or validating a `defineSandcastle({...})` config failed */
+export class ScenarioConfigError extends Data.TaggedError(
+  "ScenarioConfigError",
+)<{
+  readonly message: string;
+}> {}
+
 /** Run exceeded the configured agent idle timeout */
 export class AgentIdleTimeoutError extends Data.TaggedError(
   "AgentIdleTimeoutError",
@@ -195,6 +202,7 @@ export type SandboxError =
   | AgentError
   | ConfigDirError
   | InitError
+  | ScenarioConfigError
   | AgentIdleTimeoutError
   | WorktreeTimeoutError
   | ContainerStartTimeoutError

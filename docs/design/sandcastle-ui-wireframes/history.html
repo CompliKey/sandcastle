@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>History — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ================ App nav ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link">Live</a>
+          <a href="queue.html" class="app-nav__link">Queue</a>
+          <a href="history.html" class="app-nav__link" aria-current="page">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+
+      <!-- ================ Page ================ -->
+      <main class="list-page">
+        <header class="list-page__header">
+          <div>
+            <h1 class="list-page__title">History</h1>
+            <p class="list-page__sub">Every ticket-bounded session ever recorded on this host.</p>
+          </div>
+          <div class="list-page__actions">
+            <button type="button" class="btn btn--ghost">Export JSONL ↓</button>
+          </div>
+        </header>
+
+        <!-- Filter bar -->
+        <div class="filter-bar" role="search">
+          <span aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            class="filter-bar__search"
+            placeholder="Filter by ticket id, title, or commit sha…"
+          />
+          <span class="filter-bar__divider"></span>
+          <button type="button" class="filter-chip" aria-pressed="true">All <span class="badge">42</span></button>
+          <button type="button" class="filter-chip" aria-pressed="false">Done <span class="badge badge--success">31</span></button>
+          <button type="button" class="filter-chip" aria-pressed="false">Errored <span class="badge badge--error">8</span></button>
+          <button type="button" class="filter-chip" aria-pressed="false">Halted <span class="badge badge--warn">3</span></button>
+          <span class="filter-bar__divider"></span>
+          <button type="button" class="filter-chip">Last 24h ▾</button>
+        </div>
+
+        <!-- Sessions list -->
+        <section class="session-list" aria-label="Sessions">
+          <header class="session-list__head" role="row">
+            <span>Status</span>
+            <span>Ticket</span>
+            <span>Started</span>
+            <span>Duration</span>
+            <span>Iter.</span>
+            <span>Commits</span>
+            <span>Tokens</span>
+            <span></span>
+          </header>
+
+          <a href="ticket-detail.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-127</span>
+              <span class="session-row__title">Add JWKS endpoint to auth-api</span>
+            </span>
+            <span class="session-row__started">2026-05-02 14:32</span>
+            <span class="session-row__num">06:42</span>
+            <span class="session-row__num">5 / 12</span>
+            <span class="session-row__num">3</span>
+            <span class="session-row__num">154k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost" title="Open ticket on JIRA">↗</button>
+            </span>
+          </a>
+
+          <a href="ticket-detail.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-126</span>
+              <span class="session-row__title">JIRA backlog manager — host-side capabilities</span>
+            </span>
+            <span class="session-row__started">2026-05-02 12:11</span>
+            <span class="session-row__num">11:08</span>
+            <span class="session-row__num">9 / 12</span>
+            <span class="session-row__num">5</span>
+            <span class="session-row__num">312k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost" title="Open ticket on JIRA">↗</button>
+            </span>
+          </a>
+
+          <!-- Errored row with inline error detail + retry CTA -->
+          <a href="ticket-detail.html" class="session-row session-row--errored" role="row">
+            <span><span class="badge badge--error">✕ errored</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-118</span>
+              <span class="session-row__title">Add password-reset email template</span>
+            </span>
+            <span class="session-row__started">2026-05-02 09:47</span>
+            <span class="session-row__num">14:22</span>
+            <span class="session-row__num">12 / 12</span>
+            <span class="session-row__num session-row__num--muted">2</span>
+            <span class="session-row__num">421k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--primary">↻ Retry</button>
+            </span>
+            <span class="session-row__error-detail">
+              <strong>hit max iterations</strong> · agent-error label applied · last commit:
+              <code>chore: stub mailer config</code>
+            </span>
+          </a>
+
+          <a href="ticket-detail.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-115</span>
+              <span class="session-row__title">Migrate audit_logs to erasure pool</span>
+            </span>
+            <span class="session-row__started">2026-05-01 22:04</span>
+            <span class="session-row__num">04:51</span>
+            <span class="session-row__num">3 / 12</span>
+            <span class="session-row__num">2</span>
+            <span class="session-row__num">88k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost" title="Open ticket on JIRA">↗</button>
+            </span>
+          </a>
+
+          <!-- Halted row (autopilot circuit breaker tripped) -->
+          <a href="ticket-detail.html" class="session-row session-row--errored" role="row">
+            <span><span class="badge badge--warn">⏸ halted</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-112</span>
+              <span class="session-row__title">Wire RLS policies for tenant_invites</span>
+            </span>
+            <span class="session-row__started">2026-05-01 18:30</span>
+            <span class="session-row__num">02:14</span>
+            <span class="session-row__num session-row__num--muted">1 / 12</span>
+            <span class="session-row__num session-row__num--muted">0</span>
+            <span class="session-row__num">22k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--primary">↻ Retry</button>
+            </span>
+            <span class="session-row__error-detail">
+              <strong>autopilot halted</strong> · circuit breaker (3 consecutive failures) · sandbox provider error
+            </span>
+          </a>
+
+          <a href="ticket-detail.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-110</span>
+              <span class="session-row__title">Add Drizzle migration for orgs.feature_tier</span>
+            </span>
+            <span class="session-row__started">2026-05-01 16:22</span>
+            <span class="session-row__num">03:18</span>
+            <span class="session-row__num">2 / 12</span>
+            <span class="session-row__num">1</span>
+            <span class="session-row__num">49k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost" title="Open ticket on JIRA">↗</button>
+            </span>
+          </a>
+
+          <!-- Same ticket re-run (multiple sessions for one ticket) -->
+          <a href="ticket-detail.html" class="session-row session-row--errored" role="row">
+            <span><span class="badge badge--error">✕ errored</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-109</span>
+              <span class="session-row__title">Idle-timeout watchdog for stuck agents</span>
+            </span>
+            <span class="session-row__started">2026-05-01 14:08</span>
+            <span class="session-row__num">25:02</span>
+            <span class="session-row__num">7 / 12</span>
+            <span class="session-row__num">3</span>
+            <span class="session-row__num">198k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--primary">↻ Retry</button>
+            </span>
+            <span class="session-row__error-detail">
+              <strong>idle timeout</strong> · no agent output for 10:00 · agent may have stalled
+            </span>
+          </a>
+
+          <a href="ticket-detail.html" class="session-row" role="row">
+            <span><span class="badge badge--success">✓ done</span></span>
+            <span class="session-row__ticket-cell">
+              <span class="session-row__ticket">VGD-109</span>
+              <span class="session-row__title">Idle-timeout watchdog for stuck agents</span>
+              <span class="session-row__started">earlier session — see <code>VGD-109</code> detail</span>
+            </span>
+            <span class="session-row__started">2026-05-01 11:50</span>
+            <span class="session-row__num">07:33</span>
+            <span class="session-row__num">4 / 12</span>
+            <span class="session-row__num">2</span>
+            <span class="session-row__num">112k</span>
+            <span class="session-row__actions">
+              <button type="button" class="btn btn--ghost" title="Open ticket on JIRA">↗</button>
+            </span>
+          </a>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live session — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ================ App nav (autopilot ON) ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link" aria-current="page">Live</a>
+          <a href="queue.html" class="app-nav__link">Queue</a>
+          <a href="history.html" class="app-nav__link">History</a>
+        </nav>
+        <span class="config-changed" title="The orchestration config changed since this run started">
+          ⚠ config changed since this run started
+        </span>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+
+      <!-- ================ Session header ================ -->
+      <div class="session-header">
+        <span class="session-header__ticket">VGD-127</span>
+        <span class="session-header__title">Add JWKS endpoint to auth-api</span>
+        <span class="badge badge--accent">running</span>
+        <span class="session-header__meta">started 14:32:08 · session sess_01HZX4…</span>
+        <div class="session-header__actions">
+          <button type="button" class="btn btn--ghost">View on JIRA ↗</button>
+          <button type="button" class="btn btn--danger">Stop</button>
+        </div>
+      </div>
+
+      <!-- ================ Live metrics ================ -->
+      <div class="metrics-row" role="group" aria-label="Live session metrics">
+        <div class="metric">
+          <span class="metric__label">Iteration</span>
+          <span class="metric__value">3 / 12</span>
+          <span class="metric__sub">25% of cap</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Wall time</span>
+          <span class="metric__value">04:17</span>
+          <span class="metric__sub">since 14:32:08</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Last output</span>
+          <span class="metric__value">3s ago</span>
+          <span class="metric__sub">streaming…</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Tokens in / out</span>
+          <span class="metric__value">42.1k / 8.4k</span>
+          <span class="metric__sub">total this session</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Cache create / read</span>
+          <span class="metric__value">12.0k / 91.4k</span>
+          <span class="metric__sub">total this session</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Commits</span>
+          <span class="metric__value">2</span>
+          <span class="metric__sub"><a href="#commits">jump to list →</a></span>
+        </div>
+      </div>
+
+      <!-- ================ Body: timeline + commits sidebar ================ -->
+      <div class="session-body">
+        <!-- ===== Timeline ===== -->
+        <main class="timeline">
+          <div class="timeline__autoscroll-hint">
+            <span class="badge">📌 autoscroll paused — scroll to bottom to resume</span>
+          </div>
+
+          <!-- Iteration 1 (collapsed, completed) -->
+          <section class="iteration iteration--collapsed">
+            <header class="iteration__header">
+              <span class="iteration__chevron">▸</span>
+              <span class="iteration__num">Iteration 1</span>
+              <span class="badge badge--success">completed</span>
+              <span class="iteration__meta">
+                <span>4 tool calls</span>
+                <span>1 commit</span>
+                <span>01:12</span>
+                <span>14.2k tokens</span>
+              </span>
+            </header>
+          </section>
+
+          <!-- Iteration 2 (collapsed, completed) -->
+          <section class="iteration iteration--collapsed">
+            <header class="iteration__header">
+              <span class="iteration__chevron">▸</span>
+              <span class="iteration__num">Iteration 2</span>
+              <span class="badge badge--success">completed</span>
+              <span class="iteration__meta">
+                <span>3 tool calls</span>
+                <span>1 commit</span>
+                <span>00:48</span>
+                <span>9.6k tokens</span>
+              </span>
+            </header>
+          </section>
+
+          <!-- Iteration 3 (expanded, in flight) -->
+          <section class="iteration">
+            <header class="iteration__header">
+              <span class="iteration__chevron">▾</span>
+              <span class="iteration__num">Iteration 3</span>
+              <span class="badge badge--accent">running</span>
+              <span class="iteration__meta">
+                <span>2 tool calls so far</span>
+                <span>0 commits</span>
+                <span>02:17 elapsed</span>
+              </span>
+            </header>
+
+            <div class="iteration__body">
+              <!-- Agent text -->
+              <div class="agent-text">I'll add the JWKS endpoint. First let me look at how existing endpoints are wired up so I follow the same pattern.</div>
+
+              <!-- Tool call: Read (collapsed) -->
+              <article class="tool-card tool-card--collapsed">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▸</span>
+                  <span class="tool-card__name">Read</span>
+                  <span class="tool-card__summary">apps/auth-api/src/routes/oauth.controller.ts</span>
+                  <span class="tool-card__status badge badge--success">ok</span>
+                </header>
+              </article>
+
+              <!-- Tool call: Bash (expanded, with long output disclosure) -->
+              <article class="tool-card">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▾</span>
+                  <span class="tool-card__name">Bash</span>
+                  <span class="tool-card__summary">pnpm --filter @complikey/auth-api test -- jwks</span>
+                  <span class="tool-card__status badge badge--success">ok</span>
+                </header>
+                <div class="tool-card__body">
+                  <div>
+                    <div class="tool-card__section-label">Args</div>
+                    <pre class="tool-card__pre">{
+  "command": "pnpm --filter @complikey/auth-api test -- jwks",
+  "description": "Run JWKS-related tests",
+  "timeout": 120000
+}</pre>
+                  </div>
+                  <div>
+                    <div class="tool-card__section-label">Output (truncated)</div>
+                    <pre class="tool-card__pre"> RUN  v3.0.5
+
+ ✓ src/__tests__/unit/jwks.test.ts (4 tests) 12ms
+ ✓ src/__tests__/integration/jwks.integration.test.ts (2 tests) 184ms
+
+ Test Files  2 passed (2 passed)
+      Tests  6 passed (6 passed)
+…</pre>
+                    <button type="button" class="disclosure">
+                      ▾ Show 248 more lines
+                    </button>
+                  </div>
+                </div>
+              </article>
+
+              <!-- Tool call: Edit (expanded, structured args) -->
+              <article class="tool-card">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▾</span>
+                  <span class="tool-card__name">Edit</span>
+                  <span class="tool-card__summary">apps/auth-api/src/routes/jwks.controller.ts</span>
+                  <span class="tool-card__status badge badge--success">ok</span>
+                </header>
+                <div class="tool-card__body">
+                  <div>
+                    <div class="tool-card__section-label">Args</div>
+                    <pre class="tool-card__pre">{
+  "file_path": "apps/auth-api/src/routes/jwks.controller.ts",
+  "old_string": "// TODO(VGD-42): expose public JWKS",
+  "new_string": "@Get('/.well-known/jwks.json')\nasync getJwks() { … }"
+}</pre>
+                  </div>
+                </div>
+              </article>
+
+              <!-- In-flight tool call (no result yet) -->
+              <article class="tool-card">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▾</span>
+                  <span class="tool-card__name">Bash</span>
+                  <span class="tool-card__summary">pnpm --filter @complikey/auth-api test</span>
+                  <span class="tool-card__status badge badge--accent">running…</span>
+                </header>
+                <div class="tool-card__body">
+                  <div>
+                    <div class="tool-card__section-label">Args</div>
+                    <pre class="tool-card__pre">{
+  "command": "pnpm --filter @complikey/auth-api test",
+  "timeout": 180000
+}</pre>
+                  </div>
+                  <div class="tool-card__section-label">Awaiting result…</div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </main>
+
+        <!-- ===== Commits sidebar ===== -->
+        <aside class="commits" id="commits" aria-label="Commits in this session">
+          <div class="commits__header">
+            <span class="commits__header__title">Commits</span>
+            <span class="commits__header__count">2 in this session</span>
+          </div>
+          <ul class="commits__list">
+            <li class="commit commit--active">
+              <span class="commit__sha">a3f9e21</span>
+              <span class="commit__msg">feat(auth-api): scaffold JWKS controller</span>
+              <span class="commit__meta">iteration 2 · 14:36:24 · 3 files</span>
+              <ul class="commit__files">
+                <li class="commit__file">
+                  <span class="commit__file__status">M</span>
+                  <a href="live-session-diff.html">apps/auth-api/src/routes/jwks.controller.ts</a>
+                </li>
+                <li class="commit__file">
+                  <span class="commit__file__status">A</span>
+                  <a href="live-session-diff.html">apps/auth-api/src/__tests__/unit/jwks.test.ts</a>
+                </li>
+                <li class="commit__file">
+                  <span class="commit__file__status">M</span>
+                  <a href="live-session-diff.html">apps/auth-api/src/app.module.ts</a>
+                </li>
+              </ul>
+            </li>
+            <li class="commit">
+              <span class="commit__sha">7b02c58</span>
+              <span class="commit__msg">chore(auth-api): wire JwksModule into AppModule</span>
+              <span class="commit__meta">iteration 1 · 14:33:51 · 2 files</span>
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Diff viewer — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ================ App nav ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link" aria-current="page">Live</a>
+          <a href="queue.html" class="app-nav__link">Queue</a>
+          <a href="history.html" class="app-nav__link">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot app-nav__autopilot--on">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot ON
+        </button>
+      </header>
+
+      <!-- ================ Diff shell ================ -->
+      <div class="diff-shell">
+        <!-- File tree (commit context + files) -->
+        <aside class="diff-files" aria-label="Files in commit">
+          <header class="diff-files__header">
+            <a href="live-session.html" style="font-size: 12px">← back to session</a>
+            <span class="diff-files__title">a3f9e21</span>
+            <span class="diff-files__sub">feat(auth-api): scaffold JWKS controller</span>
+            <span class="diff-files__sub" style="color: var(--c-text-subtle)">3 files · iteration 2 · 14:36:24</span>
+          </header>
+          <ul class="diff-files__list">
+            <li class="diff-files__item diff-files__item--active">
+              <span class="commit__file__status">M</span>
+              <span class="diff-files__path">apps/auth-api/src/routes/jwks.controller.ts</span>
+              <span class="diff-files__counts">
+                <span class="diff-files__counts__add">+42</span>
+                <span class="diff-files__counts__del">−3</span>
+              </span>
+            </li>
+            <li class="diff-files__item">
+              <span class="commit__file__status">A</span>
+              <span class="diff-files__path">apps/auth-api/src/__tests__/unit/jwks.test.ts</span>
+              <span class="diff-files__counts">
+                <span class="diff-files__counts__add">+86</span>
+              </span>
+            </li>
+            <li class="diff-files__item">
+              <span class="commit__file__status">M</span>
+              <span class="diff-files__path">apps/auth-api/src/app.module.ts</span>
+              <span class="diff-files__counts">
+                <span class="diff-files__counts__add">+2</span>
+                <span class="diff-files__counts__del">−1</span>
+              </span>
+            </li>
+          </ul>
+        </aside>
+
+        <!-- Diff main pane -->
+        <section class="diff-main" aria-label="File diff">
+          <div class="diff-toolbar">
+            <span class="diff-toolbar__path">apps/auth-api/src/routes/jwks.controller.ts</span>
+            <span class="diff-files__counts">
+              <span class="diff-files__counts__add">+42</span>
+              <span class="diff-files__counts__del">−3</span>
+            </span>
+            <div class="toggle" role="group" aria-label="Diff layout">
+              <button type="button" class="toggle__button" aria-pressed="false">Unified</button>
+              <button type="button" class="toggle__button" aria-pressed="true">Side-by-side</button>
+            </div>
+          </div>
+
+          <!-- Side-by-side diff (selected) -->
+          <div class="diff-pane">
+            <!-- LEFT: before -->
+            <div class="diff-side">
+              <header class="diff-side__header">a3f9e21^ · before</header>
+
+              <div class="diff-line diff-line--hunk">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code">@@ -1,8 +1,47 @@ jwks.controller.ts</span>
+              </div>
+
+              <div class="diff-line">
+                <span class="diff-line__num">1</span>
+                <span class="diff-line__code">import { Controller } from '@nestjs/common';</span>
+              </div>
+              <div class="diff-line">
+                <span class="diff-line__num">2</span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--del">
+                <span class="diff-line__num">3</span>
+                <span class="diff-line__code">@Controller('/.well-known')</span>
+              </div>
+              <div class="diff-line diff-line--del">
+                <span class="diff-line__num">4</span>
+                <span class="diff-line__code">export class JwksController {</span>
+              </div>
+              <div class="diff-line diff-line--del">
+                <span class="diff-line__num">5</span>
+                <span class="diff-line__code">  // TODO(VGD-42): expose public JWKS</span>
+              </div>
+              <div class="diff-line">
+                <span class="diff-line__num">6</span>
+                <span class="diff-line__code">}</span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--empty">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code"></span>
+              </div>
+            </div>
+
+            <!-- RIGHT: after -->
+            <div class="diff-side">
+              <header class="diff-side__header">a3f9e21 · after</header>
+
+              <div class="diff-line diff-line--hunk">
+                <span class="diff-line__num"></span>
+                <span class="diff-line__code">@@ -1,8 +1,47 @@ jwks.controller.ts</span>
+              </div>
+
+              <div class="diff-line">
+                <span class="diff-line__num">1</span>
+                <span class="diff-line__code">import { Controller, Get } from '@nestjs/common';</span>
+              </div>
+              <div class="diff-line">
+                <span class="diff-line__num">2</span>
+                <span class="diff-line__code">import { JwksService } from '../auth/jwks.service.js';</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">3</span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">4</span>
+                <span class="diff-line__code">@Controller('/.well-known')</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">5</span>
+                <span class="diff-line__code">export class JwksController {</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">6</span>
+                <span class="diff-line__code">  constructor(private readonly jwks: JwksService) {}</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">7</span>
+                <span class="diff-line__code"></span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">8</span>
+                <span class="diff-line__code">  @Get('/jwks.json')</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">9</span>
+                <span class="diff-line__code">  async getJwks() {</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">10</span>
+                <span class="diff-line__code">    return this.jwks.publicKeySet();</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">11</span>
+                <span class="diff-line__code">  }</span>
+              </div>
+              <div class="diff-line diff-line--add">
+                <span class="diff-line__num">12</span>
+                <span class="diff-line__code">}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>

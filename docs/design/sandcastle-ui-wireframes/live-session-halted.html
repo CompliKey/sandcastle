@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Halted state — sandcastle ui wireframes</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!--
+        Variant of the live session view showing the *halted* state:
+        - Autopilot toggle reads OFF (manual mode)
+        - Halt banner present with Resume CTA
+        - Session header shows the stopped run with the errored badge
+        - Timeline scrolled past iteration 2 — iteration 3 is the failed one
+
+        Acceptance-criteria coverage: halt banner visible, autopilot-OFF
+        state, errored-ticket retry, autoscroll-following timeline (no
+        paused hint), iterations both collapsed and expanded.
+      -->
+
+      <!-- ================ App nav (autopilot OFF) ================ -->
+      <header class="app-nav">
+        <a href="index.html" class="app-nav__brand">sandcastle</a>
+        <nav class="app-nav__links" aria-label="Primary">
+          <a href="live-session.html" class="app-nav__link" aria-current="page">Live</a>
+          <a href="queue.html" class="app-nav__link">Queue</a>
+          <a href="history.html" class="app-nav__link">History</a>
+        </nav>
+        <div class="app-nav__spacer"></div>
+        <button type="button" class="app-nav__autopilot">
+          <span class="app-nav__autopilot__dot"></span>
+          Autopilot OFF
+        </button>
+      </header>
+
+      <!-- ================ Halt banner ================ -->
+      <div class="halt-banner" role="alert">
+        <span class="halt-banner__title">Autopilot halted</span>
+        <span class="halt-banner__detail">
+          3 consecutive ticket-level failures — last: <code>VGD-118</code> hit max iterations.
+          Manual mode is active until you Resume.
+        </span>
+        <button type="button" class="halt-banner__resume">Resume autopilot</button>
+      </div>
+
+      <!-- ================ Session header (errored) ================ -->
+      <div class="session-header">
+        <span class="session-header__ticket">VGD-118</span>
+        <span class="session-header__title">Add password-reset email template</span>
+        <span class="badge badge--error">errored</span>
+        <span class="session-header__meta">
+          stopped 14:21:30 · session sess_01HZX2A4… · ran for 14:22
+        </span>
+        <div class="session-header__actions">
+          <button type="button" class="btn btn--ghost">View on JIRA ↗</button>
+          <button type="button" class="btn btn--primary">↻ Retry</button>
+        </div>
+      </div>
+
+      <!-- ================ Final metrics ================ -->
+      <div class="metrics-row" role="group" aria-label="Final session metrics">
+        <div class="metric">
+          <span class="metric__label">Iteration</span>
+          <span class="metric__value">12 / 12</span>
+          <span class="metric__sub">cap reached</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Wall time</span>
+          <span class="metric__value">14:22</span>
+          <span class="metric__sub">final</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Last output</span>
+          <span class="metric__value">stopped</span>
+          <span class="metric__sub">at 14:21:30</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Tokens in / out</span>
+          <span class="metric__value">312k / 41k</span>
+          <span class="metric__sub">total this session</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Cache create / read</span>
+          <span class="metric__value">28k / 720k</span>
+          <span class="metric__sub">total this session</span>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Commits</span>
+          <span class="metric__value">2</span>
+          <span class="metric__sub">last: <code>chore: stub mailer</code></span>
+        </div>
+      </div>
+
+      <!-- ================ Body ================ -->
+      <div class="session-body">
+        <main class="timeline">
+          <!-- No autoscroll hint — timeline is at the bottom (final state). -->
+
+          <!-- Iterations 1-11 collapsed for brevity in the wireframe -->
+          <section class="iteration iteration--collapsed">
+            <header class="iteration__header">
+              <span class="iteration__chevron">▸</span>
+              <span class="iteration__num">Iterations 1–11</span>
+              <span class="badge badge--success">completed</span>
+              <span class="iteration__meta">
+                <span>32 tool calls</span>
+                <span>2 commits</span>
+                <span>13:08</span>
+                <span>720k tokens</span>
+              </span>
+            </header>
+          </section>
+
+          <!-- Iteration 12 (the failure) -->
+          <section class="iteration">
+            <header class="iteration__header">
+              <span class="iteration__chevron">▾</span>
+              <span class="iteration__num">Iteration 12</span>
+              <span class="badge badge--error">hit max iterations</span>
+              <span class="iteration__meta">
+                <span>3 tool calls</span>
+                <span>0 commits</span>
+                <span>01:14</span>
+                <span>33k tokens</span>
+              </span>
+            </header>
+
+            <div class="iteration__body">
+              <div class="agent-text">I notice we've used all the iterations. Let me try a different approach to the mailer config and ship a smaller change…</div>
+
+              <article class="tool-card tool-card--collapsed">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▸</span>
+                  <span class="tool-card__name">Read</span>
+                  <span class="tool-card__summary">apps/auth-api/src/auth/mailer.config.ts</span>
+                  <span class="tool-card__status badge badge--success">ok</span>
+                </header>
+              </article>
+
+              <article class="tool-card tool-card--collapsed">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▸</span>
+                  <span class="tool-card__name">Edit</span>
+                  <span class="tool-card__summary">apps/auth-api/src/auth/mailer.config.ts</span>
+                  <span class="tool-card__status badge badge--success">ok</span>
+                </header>
+              </article>
+
+              <article class="tool-card">
+                <header class="tool-card__header">
+                  <span class="tool-card__chevron">▾</span>
+                  <span class="tool-card__name">Bash</span>
+                  <span class="tool-card__summary">pnpm --filter @complikey/auth-api test -- mailer</span>
+                  <span class="tool-card__status badge badge--warn">interrupted</span>
+                </header>
+                <div class="tool-card__body">
+                  <div>
+                    <div class="tool-card__section-label">Args</div>
+                    <pre class="tool-card__pre">{
+  "command": "pnpm --filter @complikey/auth-api test -- mailer",
+  "timeout": 180000
+}</pre>
+                  </div>
+                  <div>
+                    <div class="tool-card__section-label">Status</div>
+                    <pre class="tool-card__pre">Iteration cap reached — tool call cancelled before result.
+Session ended as ticket-level failure (hit max iterations).</pre>
+                  </div>
+                </div>
+              </article>
+
+              <!-- Failure detail strip -->
+              <div class="halt-banner" style="margin: 0; border: 1px solid var(--c-error-border); border-radius: var(--radius-md);">
+                <span class="halt-banner__title">Ticket-level failure</span>
+                <span class="halt-banner__detail">
+                  hit max iterations · agent-error label applied · JIRA comment posted with failure context
+                </span>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <!-- Commits sidebar (final) -->
+        <aside class="commits" aria-label="Commits in this session">
+          <div class="commits__header">
+            <span class="commits__header__title">Commits</span>
+            <span class="commits__header__count">2 final · run halted</span>
+          </div>
+          <ul class="commits__list">
+            <li class="commit">
+              <span class="commit__sha">be91f44</span>
+              <span class="commit__msg">chore: stub mailer config</span>
+              <span class="commit__meta">iteration 9 · 14:18:02 · 1 file</span>
+            </li>
+            <li class="commit">
+              <span class="commit__sha">12ec88b</span>
+              <span class="commit__msg">feat(auth-api): scaffold password-reset route</span>
+              <span class="commit__meta">iteration 4 · 14:11:21 · 4 files</span>
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>

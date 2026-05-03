@@ -4,11 +4,13 @@ import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 
 import { createAutopilotController } from "./AutopilotController.js";
+import { createConfigWatcher, type ConfigWatcher } from "./ConfigWatcher.js";
 import { createEventBroadcaster } from "./EventBroadcaster.js";
 import { createEventStore } from "./EventStore.js";
 import { createGitDiffService } from "./GitDiffService.js";
@@ -489,6 +491,42 @@ const podmanCommand = Command.make("podman", {}, () =>
 // --- Scenarios commands ---
 
 const DEFAULT_CONFIG_PATH = ".sandcastle/main.ts";
+
+/**
+ * Resolve the set of files the {@link ConfigWatcher} should track.
+ *
+ * We list the contents of `.sandcastle/` once at startup and pick up:
+ *  - `main.ts` / `main.mts` / `main.config.ts` (entry-point variants)
+ *  - any top-level `*.md` (the prompt-template convention used by the
+ *    bundled scaffolds — `implement-prompt.md`, `plan-prompt.md`, ...)
+ *
+ * Subdirectories are ignored: `.sandcastle/logs/` is the loud one and
+ * watching it would fire on every event flush.
+ *
+ * Returns absolute paths. Missing files are not pre-filtered — the watcher
+ * tolerates them and will fire on creation.
+ */
+const discoverConfigWatchTargets = async (
+  configDir: string,
+): Promise<readonly string[]> => {
+  const entries = await readdir(configDir, { withFileTypes: true }).catch(
+    () => [] as Array<{ name: string; isFile: () => boolean }>,
+  );
+  const candidates = new Set<string>();
+  // Always include the canonical entry-point variants, even if absent today
+  // — the watcher fires on later creation.
+  candidates.add(join(configDir, "main.ts"));
+  candidates.add(join(configDir, "main.mts"));
+  candidates.add(join(configDir, "main.config.ts"));
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    if (name.endsWith(".md")) {
+      candidates.add(join(configDir, name));
+    }
+  }
+  return [...candidates];
+};
 
 const scenariosConfigOption = Options.file("config").pipe(
   Options.withDescription(
@@ -1018,6 +1056,42 @@ const uiCommand = Command.make(
       // 3. Start the server.
       const gitDiffService = createGitDiffService({ repoDir: cwd });
 
+      // Config watcher — passive notice that .sandcastle/main.* or any of
+      // the prompt-template `.md` files have changed since the UI server
+      // started. Fires `config.changed` on the WS without touching the
+      // running session. Best-effort: any failure here (chokidar can throw
+      // on inotify exhaustion) is logged and the server continues without
+      // the badge.
+      const configDir = join(cwd, CONFIG_DIR);
+      const watchTargets = yield* Effect.promise(() =>
+        discoverConfigWatchTargets(configDir),
+      );
+      let configWatcher: ConfigWatcher | undefined;
+      const configWatcherEither = yield* Effect.either(
+        Effect.tryPromise(() =>
+          createConfigWatcher({
+            files: watchTargets,
+            onChange: () => {
+              // Subscribers (WS handlers) receive the event directly; we
+              // don't log here because each connected client logs on its
+              // own side.
+            },
+          }),
+        ),
+      );
+      if (configWatcherEither._tag === "Right") {
+        configWatcher = configWatcherEither.right;
+      } else {
+        yield* d.status(
+          `Config watcher disabled: ${
+            configWatcherEither.left instanceof Error
+              ? configWatcherEither.left.message
+              : String(configWatcherEither.left)
+          }`,
+          "warn",
+        );
+      }
+
       // Manual-invocation adapter: allocates a sessionId synchronously and
       // returns it to the caller while the scenario continues in the
       // background. Errors that occur after fork are observable via the
@@ -1088,6 +1162,7 @@ const uiCommand = Command.make(
               ? { runScenario: runScenarioRequest }
               : {}),
             ...(autopilot !== undefined ? { autopilot } : {}),
+            ...(configWatcher !== undefined ? { configWatcher } : {}),
           }),
         catch: (err) => {
           const isAddrInUse =
@@ -1167,6 +1242,7 @@ const uiCommand = Command.make(
             process.removeListener("SIGHUP", onSignal);
             if (autopilot) await autopilot.shutdown();
             await server.close();
+            if (configWatcher) await configWatcher.close();
             await bridgeDone;
             await store.close();
             await removeLockfile(stateDir);

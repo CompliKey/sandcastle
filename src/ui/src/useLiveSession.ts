@@ -14,10 +14,27 @@ import { useEffect, useRef, useState } from "react";
 import { applyEventToView } from "./applyEventToView.js";
 import type { LiveMessage, SessionView } from "./api.js";
 
+/**
+ * Snapshot of one config-file change reported over `/ws`. The hook
+ * accumulates these (one entry per path; a re-change overwrites the
+ * timestamp) and surfaces them via {@link UseLiveSessionResult.configChanges}.
+ */
+export interface ConfigChangeNotice {
+  readonly path: string;
+  readonly changedAt: number;
+}
+
 export interface UseLiveSessionResult {
   view: SessionView | null;
   error: string | null;
   connected: boolean;
+  /**
+   * Files that have changed on disk since the UI server started. Empty until
+   * the first `config.changed` arrives. Sticky for the lifetime of the
+   * connection — reverting a file does not clear an entry, because the
+   * running session was already started under the old config.
+   */
+  configChanges: readonly ConfigChangeNotice[];
 }
 
 const buildWsUrl = (sessionId: string): string => {
@@ -32,6 +49,9 @@ export const useLiveSession = (
   const [view, setView] = useState<SessionView | null>(initialView ?? null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [configChanges, setConfigChanges] = useState<
+    readonly ConfigChangeNotice[]
+  >([]);
 
   // Hold a ref to the latest view so the message handler closure can read it
   // without re-binding on every state change.
@@ -50,6 +70,9 @@ export const useLiveSession = (
     viewRef.current = initialViewRef.current ?? null;
     setError(null);
     setConnected(false);
+    // Reset on session change — a different live view starts with a clean
+    // slate, even if the same UI-server process has seen earlier changes.
+    setConfigChanges([]);
     let snapshotReceived = false;
 
     const ws = new WebSocket(buildWsUrl(sessionId));
@@ -110,6 +133,12 @@ export const useLiveSession = (
           setView(next);
           return;
         }
+        case "config.changed":
+          setConfigChanges((prev) => {
+            const filtered = prev.filter((c) => c.path !== msg.path);
+            return [...filtered, { path: msg.path, changedAt: msg.changedAt }];
+          });
+          return;
         case "error":
           setError(msg.reason);
           return;
@@ -127,5 +156,5 @@ export const useLiveSession = (
     };
   }, [sessionId]);
 
-  return { view, error, connected };
+  return { view, error, connected, configChanges };
 };

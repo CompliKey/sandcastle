@@ -78,6 +78,104 @@ afterEach(async () => {
 });
 
 describe("sandcastle ui — end-to-end", () => {
+  it("pushes a config.changed WS event when .sandcastle/main.ts is modified", async () => {
+    const port = await pickFreePort();
+    // Seed an in-flight session — write only `session.start`, no end. The
+    // smoke test elsewhere uses a finished session; we override the seed
+    // here with `node:fs` writes so the WS upgrade succeeds.
+    const stateDir = join(cwd, ".sandcastle", "state");
+    const startedAt = Date.now();
+    const yyyymm = new Date(startedAt).toISOString().slice(0, 7);
+    const inflight: SandcastleEvent[] = [
+      {
+        type: "session.start",
+        laneId: "main",
+        timestamp: startedAt,
+        sessionId: "ses_inflight",
+        ticketId: "VGD-146",
+        scenario: "implement",
+        startedAt,
+      },
+    ];
+    await writeFile(
+      join(stateDir, `events-${yyyymm}.jsonl`),
+      `${inflight.map((e) => JSON.stringify(e)).join("\n")}\n`,
+      "utf8",
+    );
+
+    // The watcher needs main.ts to exist at start so chokidar picks up the
+    // 'change' event (rather than 'add', which we also handle but takes a
+    // different code path).
+    const mainPath = join(cwd, ".sandcastle", "main.ts");
+    await writeFile(mainPath, "// initial\n", "utf8");
+
+    const child = spawn(
+      "node",
+      [cliPath, "ui", "--no-open", "--port", String(port)],
+      { cwd, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    try {
+      const url = `http://127.0.0.1:${port}`;
+      expect(await waitForReady(url, 5000)).toBe(true);
+
+      const ws = new WebSocket(
+        `ws://127.0.0.1:${port}/ws?session=ses_inflight`,
+      );
+      const messages: Array<{ type: string; path?: string }> = [];
+      ws.addEventListener("message", (ev) => {
+        try {
+          messages.push(
+            JSON.parse(typeof ev.data === "string" ? ev.data : "") as {
+              type: string;
+              path?: string;
+            },
+          );
+        } catch {
+          // ignore malformed
+        }
+      });
+      await new Promise<void>((resolve, reject) => {
+        ws.addEventListener("open", () => resolve(), { once: true });
+        ws.addEventListener(
+          "error",
+          () => reject(new Error("ws open failed")),
+          {
+            once: true,
+          },
+        );
+      });
+
+      // Wait for snapshot before mutating, to ensure we don't race the
+      // backfill window.
+      const deadline = Date.now() + 2_000;
+      while (
+        !messages.some((m) => m.type === "snapshot") &&
+        Date.now() < deadline
+      ) {
+        await wait(20);
+      }
+
+      // Trigger a real config change: rewrite main.ts with new content.
+      await writeFile(mainPath, "// MUTATED\n", "utf8");
+
+      const seenDeadline = Date.now() + 5_000;
+      while (
+        !messages.some((m) => m.type === "config.changed") &&
+        Date.now() < seenDeadline
+      ) {
+        await wait(50);
+      }
+      ws.close();
+
+      const cfg = messages.find((m) => m.type === "config.changed");
+      expect(cfg).toBeDefined();
+      expect(cfg?.path).toBe(mainPath);
+    } finally {
+      child.kill("SIGINT");
+      await waitForExit(child, 5000);
+    }
+  });
+
   it("serves /api/sessions from the on-disk event log", async () => {
     const port = await pickFreePort();
     const child = spawn(

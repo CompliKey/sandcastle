@@ -1,7 +1,8 @@
-import { useLayoutEffect, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 
 import type { SessionView } from "../api.js";
+import { useConfigChangedWriter } from "../configChanged/ConfigChangedContext.js";
 import { formatStartedAt } from "../format.js";
 import { useLiveSession } from "../useLiveSession.js";
 import { CommitsPanel } from "./CommitsPanel.js";
@@ -38,6 +39,25 @@ export const LiveSessionView = ({
   const { pinned, containerRef, bumpToBottom } =
     useAutoscrollPin<HTMLDivElement>();
 
+  // Publish config-change notices into the app-shell badge context, but
+  // only while we're actually viewing an in-flight live session. The badge
+  // hides itself (clears state) on unmount and on session-id change so a
+  // navigation away from the live view (or into a historical one) wipes it.
+  const { setNotices, clear } = useConfigChangedWriter();
+  const running = view ? view.outcome === undefined : false;
+  useEffect(() => {
+    if (!isLive || !running) {
+      clear();
+      return;
+    }
+    setNotices(live.configChanges);
+  }, [isLive, running, live.configChanges, setNotices, clear]);
+  useEffect(() => {
+    return () => {
+      clear();
+    };
+  }, [clear]);
+
   // Snap to bottom whenever the iterations array length changes — that is
   // the cheapest "new content arrived" signal we have without diffing.
   const iterationCount = view?.iterations.length ?? 0;
@@ -69,7 +89,6 @@ export const LiveSessionView = ({
     );
   }
 
-  const running = view.outcome === undefined;
   const statusBadge = running
     ? { label: "running", cls: "badge--accent" }
     : view.outcome === "done"

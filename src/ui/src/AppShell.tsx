@@ -2,6 +2,17 @@ import { useState, type PropsWithChildren, type ReactElement } from "react";
 import { NavLink } from "react-router-dom";
 
 import { useAutopilotContext } from "./autopilot/AutopilotProvider.js";
+import { useConfigChangedNotices } from "./configChanged/ConfigChangedContext.js";
+
+/**
+ * Tooltip-display helper for the config-changed badge — last two path
+ * segments are usually enough to disambiguate a prompt template from
+ * `main.ts` without dumping the user's absolute repo path into a hover.
+ */
+const shortenPath = (path: string): string => {
+  const parts = path.split(/[\\/]/);
+  return parts.slice(-2).join("/");
+};
 
 /**
  * App shell — sticky top nav, autopilot pill on the right, and the halt
@@ -15,6 +26,7 @@ import { useAutopilotContext } from "./autopilot/AutopilotProvider.js";
  */
 export const AppShell = ({ children }: PropsWithChildren): ReactElement => {
   const ap = useAutopilotContext();
+  const configNotices = useConfigChangedNotices();
   const [busy, setBusy] = useState(false);
 
   const status = ap.state?.status ?? (ap.unavailable ? "off" : "off");
@@ -74,6 +86,18 @@ export const AppShell = ({ children }: PropsWithChildren): ReactElement => {
             Queue
           </NavLink>
         </nav>
+        {configNotices.length > 0 && (
+          <span
+            className="config-changed"
+            title={configNotices
+              .map((n) => `${shortenPath(n.path)} (changed)`)
+              .join("\n")}
+            data-testid="config-changed-badge"
+          >
+            <span aria-hidden="true">⚠ </span>
+            config changed since this run started
+          </span>
+        )}
         <div className="app-nav__spacer" />
         <button
           type="button"

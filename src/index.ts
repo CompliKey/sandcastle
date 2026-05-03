@@ -67,6 +67,23 @@ export type {
   ScenarioMetadata,
   SandcastleConfigMetadata,
 } from "./ScenarioConfigLoader.js";
+export { runScenario } from "./ScenarioRunner.js";
+export type {
+  ScenarioRunnerOptions,
+  ScenarioRunResult,
+} from "./ScenarioRunner.js";
+export { createEventStore } from "./EventStore.js";
+export type {
+  EventStore,
+  SandcastleEvent,
+  SessionOutcome,
+  EventCursor,
+  ReplayedEvent,
+  EventIterationUsage,
+  EventStoreOptions,
+  ReplayOptions,
+  TailOptions,
+} from "./EventStore.js";
 export { createJiraBacklogManager } from "./JiraBacklogManager.js";
 export type { JiraBacklogManagerConfig } from "./JiraBacklogManager.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";

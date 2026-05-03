@@ -44,7 +44,10 @@ export interface HandleFailureInput {
 export interface HandleFailureResult {
   readonly kind: FailureKind;
   readonly action: FailureAction;
+  /** Per-ticket reason (matches what was sent as `markErrored.reason`, when applicable). */
   readonly reason: string;
+  /** Present iff `action === "halt"`. Explains why the queue is stopping. */
+  readonly haltReason?: string;
 }
 
 export interface FailureCoordinator {
@@ -58,11 +61,12 @@ const buildMarkErroredArgs = (
   ticketId: string,
   reason: string,
   message: string,
-): MarkErroredArgs => ({
-  id: ticketId,
-  reason,
-  comment: message,
-});
+): MarkErroredArgs => {
+  const trimmed = message.trim();
+  return trimmed.length > 0
+    ? { id: ticketId, reason, comment: trimmed }
+    : { id: ticketId, reason };
+};
 
 export const createFailureCoordinator = (
   options: FailureCoordinatorOptions,
@@ -81,6 +85,10 @@ export const createFailureCoordinator = (
       );
 
       if (classification.kind === "ticket-level") {
+        // Order matters: the increment must follow a successful markErrored.
+        // If the backlog system is down and the call throws, we propagate
+        // and leave the counter unchanged so a permanently-broken backlog
+        // can't false-trip the breaker against tickets it never recorded.
         await options.backlogManager.markErrored(
           buildMarkErroredArgs(
             input.ticketId,
@@ -91,11 +99,18 @@ export const createFailureCoordinator = (
         consecutive += 1;
       }
 
-      return {
-        kind: classification.kind,
-        action: classification.action,
-        reason: classification.reason,
-      };
+      return classification.haltReason !== undefined
+        ? {
+            kind: classification.kind,
+            action: classification.action,
+            reason: classification.reason,
+            haltReason: classification.haltReason,
+          }
+        : {
+            kind: classification.kind,
+            action: classification.action,
+            reason: classification.reason,
+          };
     },
     noteSuccess() {
       consecutive = 0;

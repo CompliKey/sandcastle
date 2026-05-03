@@ -65,7 +65,7 @@ describe("FailurePolicy.classifyFailure", () => {
   });
 
   describe("circuit breaker", () => {
-    it("just below the default threshold, ticket-level still continues", () => {
+    it("just below the default threshold, ticket-level still continues and has no haltReason", () => {
       // prior=1 + this = 2nd consecutive (default threshold 3) → continue.
       const result = classifyFailure({
         category: "agent.max-iterations",
@@ -74,9 +74,10 @@ describe("FailurePolicy.classifyFailure", () => {
       });
       expect(result.kind).toBe("ticket-level");
       expect(result.action).toBe("continue");
+      expect(result.haltReason).toBeUndefined();
     });
 
-    it("at the default threshold, action flips to halt with a circuit-breaker reason", () => {
+    it("at the default threshold, action flips to halt — `reason` stays per-ticket and `haltReason` carries the breaker context", () => {
       // prior=2 + this = 3rd consecutive (default threshold 3) → halt.
       const result = classifyFailure({
         category: "agent.max-iterations",
@@ -85,12 +86,14 @@ describe("FailurePolicy.classifyFailure", () => {
       });
       expect(result.kind).toBe("ticket-level");
       expect(result.action).toBe("halt");
-      expect(result.reason).toMatch(
-        /^halted: 3 consecutive ticket-level failures/,
-      );
+      // Per-ticket reason must NOT mutate when the breaker trips — JIRA's
+      // markErrored.reason needs to stay greppable across runs.
+      expect(result.reason).toBe("agent hit max iterations without completing");
+      expect(result.reason).not.toMatch(/consecutive/);
+      expect(result.haltReason).toBe("3 consecutive ticket-level failures");
     });
 
-    it("infra-level always halts and never reports the circuit-breaker reason", () => {
+    it("infra-level always halts and `haltReason` mirrors `reason`", () => {
       const result = classifyFailure({
         category: "sandbox.provider.error",
         message: "msg",
@@ -99,9 +102,10 @@ describe("FailurePolicy.classifyFailure", () => {
       expect(result.kind).toBe("infra-level");
       expect(result.action).toBe("halt");
       expect(result.reason).not.toMatch(/consecutive/);
+      expect(result.haltReason).toBe(result.reason);
     });
 
-    it("respects a configured threshold of 1 — first ticket-level failure halts", () => {
+    it("respects a configured threshold of 1 — first ticket-level failure halts; `reason` stays per-ticket", () => {
       const result = classifyFailure(
         {
           category: "agent.max-iterations",
@@ -111,7 +115,8 @@ describe("FailurePolicy.classifyFailure", () => {
         { consecutiveFailureThreshold: 1 },
       );
       expect(result.action).toBe("halt");
-      expect(result.reason).toMatch(/^halted: 1 consecutive/);
+      expect(result.reason).toBe("agent hit max iterations without completing");
+      expect(result.haltReason).toBe("1 consecutive ticket-level failures");
     });
 
     it("respects a configured threshold of 5 — does not halt at 3", () => {
@@ -124,6 +129,75 @@ describe("FailurePolicy.classifyFailure", () => {
         { consecutiveFailureThreshold: 5 },
       );
       expect(result.action).toBe("continue");
+    });
+  });
+
+  describe("defensive runtime fallback for unknown categories", () => {
+    it("treats an unknown category string as an infra-level halt", () => {
+      const result = classifyFailure({
+        // Simulate an I/O-boundary value that escaped the type narrowing,
+        // e.g. an orchestrator forwarding an unmapped SandboxError._tag.
+        category: "agent.exploded-the-microwave" as never,
+        message: "msg",
+        consecutiveTicketLevelFailures: 0,
+      });
+      expect(result.kind).toBe("infra-level");
+      expect(result.action).toBe("halt");
+      expect(result.reason).toMatch(/^unknown failure category:/);
+      expect(result.haltReason).toBe(result.reason);
+    });
+
+    it("does not increment the ticket-level streak (unknown is infra-level by fiat)", () => {
+      // Sanity: caller-side, the contract is that infra-level results don't
+      // contribute to the consecutive counter. We assert the kind here; the
+      // counter behaviour is tested in FailureCoordinator.test.ts.
+      const result = classifyFailure({
+        category: "totally.bogus" as never,
+        message: "msg",
+        consecutiveTicketLevelFailures: 5,
+      });
+      expect(result.kind).toBe("infra-level");
+    });
+  });
+
+  describe("config validation", () => {
+    it("throws RangeError when consecutiveFailureThreshold is 0", () => {
+      expect(() =>
+        classifyFailure(
+          {
+            category: "agent.max-iterations",
+            message: "msg",
+            consecutiveTicketLevelFailures: 0,
+          },
+          { consecutiveFailureThreshold: 0 },
+        ),
+      ).toThrow(RangeError);
+    });
+
+    it("throws RangeError when consecutiveFailureThreshold is negative", () => {
+      expect(() =>
+        classifyFailure(
+          {
+            category: "agent.max-iterations",
+            message: "msg",
+            consecutiveTicketLevelFailures: 0,
+          },
+          { consecutiveFailureThreshold: -1 },
+        ),
+      ).toThrow(RangeError);
+    });
+
+    it("throws RangeError when consecutiveFailureThreshold is non-integer", () => {
+      expect(() =>
+        classifyFailure(
+          {
+            category: "agent.max-iterations",
+            message: "msg",
+            consecutiveTicketLevelFailures: 0,
+          },
+          { consecutiveFailureThreshold: 2.5 },
+        ),
+      ).toThrow(RangeError);
     });
   });
 });

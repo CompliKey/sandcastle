@@ -18,6 +18,17 @@
  * classification still reports `kind: "ticket-level"` (the ticket itself is
  * still a ticket-level failure and should be labelled), but flips `action` to
  * `"halt"` so the queue stops instead of grinding through more bad runs.
+ *
+ * `reason` vs `haltReason`:
+ *  - `reason` is the per-ticket failure summary, always derived from the
+ *    category. It is what `markErrored.reason` will receive verbatim, so it
+ *    must stay greppable across runs (e.g. `"agent hit max iterations without
+ *    completing"`).
+ *  - `haltReason` is present only when `action === "halt"`, and explains why
+ *    the queue is stopping. For infra-level it mirrors the per-ticket reason
+ *    (the failure itself is what halts). For a circuit-breaker boundary
+ *    (ticket-level halt) it carries the breaker context separately so the
+ *    per-ticket `reason` is not polluted with queue-level state.
  */
 
 export type FailureKind = "ticket-level" | "infra-level";
@@ -42,8 +53,18 @@ export type FailureCategory =
 export interface FailureClassification {
   readonly kind: FailureKind;
   readonly action: FailureAction;
-  /** Short reason; used verbatim as `markErrored.reason` for ticket-level. */
+  /**
+   * Per-ticket failure summary derived from the category. Always set; used
+   * verbatim as `markErrored.reason` for ticket-level. Stable & greppable —
+   * does NOT mutate when the circuit breaker trips.
+   */
   readonly reason: string;
+  /**
+   * Present only when `action === "halt"`. Explains why the queue is stopping.
+   * For infra-level halts this mirrors `reason`. For ticket-level halts (the
+   * circuit-breaker boundary) it describes the breaker condition separately.
+   */
+  readonly haltReason?: string;
 }
 
 export interface PolicyConfig {
@@ -116,22 +137,50 @@ export const classifyFailure = (
   input: FailureInput,
   config: PolicyConfig = {},
 ): FailureClassification => {
-  const entry = CATEGORY_TABLE[input.category];
-
-  if (entry.kind === "infra-level") {
-    return { kind: "infra-level", action: "halt", reason: entry.reason };
-  }
-
   const threshold =
     config.consecutiveFailureThreshold ?? DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD;
+  if (!Number.isInteger(threshold) || threshold < 1) {
+    throw new RangeError(
+      `consecutiveFailureThreshold must be a positive integer (got ${threshold})`,
+    );
+  }
+
+  // Defensive: the type system narrows `category` to `FailureCategory`, but
+  // callers downstream of an I/O boundary (e.g. orchestrator forwarding a
+  // `SandboxError._tag` whose mapping table hasn't been extended yet) can pass
+  // an unknown string at runtime. Treat unknowns as infra-level halts: we
+  // don't trust the system enough to label a ticket on its behalf, and a
+  // human should see the queue stop.
+  const entry = CATEGORY_TABLE[input.category] as CategoryEntry | undefined;
+  if (entry === undefined) {
+    const reason = `unknown failure category: ${String(input.category)}`;
+    return { kind: "infra-level", action: "halt", reason, haltReason: reason };
+  }
+
+  if (entry.kind === "infra-level") {
+    return {
+      kind: "infra-level",
+      action: "halt",
+      reason: entry.reason,
+      haltReason: entry.reason,
+    };
+  }
+
   const consecutiveIncludingThis = input.consecutiveTicketLevelFailures + 1;
   const tripped = consecutiveIncludingThis >= threshold;
 
+  if (tripped) {
+    return {
+      kind: "ticket-level",
+      action: "halt",
+      reason: entry.reason,
+      haltReason: `${consecutiveIncludingThis} consecutive ticket-level failures`,
+    };
+  }
+
   return {
     kind: "ticket-level",
-    action: tripped ? "halt" : "continue",
-    reason: tripped
-      ? `halted: ${consecutiveIncludingThis} consecutive ticket-level failures (${entry.reason})`
-      : entry.reason,
+    action: "continue",
+    reason: entry.reason,
   };
 };

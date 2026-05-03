@@ -171,6 +171,137 @@ describe("UiServer — REST surface", () => {
   });
 });
 
+describe("UiServer — commits + diff", () => {
+  const fakeCommit = {
+    sha: "deadbeef",
+    parentSha: "cafebabe",
+    subject: "feat: do the thing",
+    authorName: "ci",
+    authorEmail: "ci@example.com",
+    authorTime: 1_700_000_000_000,
+    files: [
+      {
+        path: "src/foo.ts",
+        status: "M" as const,
+        insertions: 5,
+        deletions: 1,
+      },
+    ],
+  };
+
+  it("returns commit metadata for a session-known sha", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({
+      index,
+      port: 0,
+      gitDiffService: {
+        getCommit: async () => fakeCommit,
+        getFileDiff: async () => ({
+          path: "src/foo.ts",
+          diff: "diff body",
+          status: "M",
+          insertions: 5,
+          deletions: 1,
+        }),
+        hasCommit: async () => true,
+      },
+    });
+
+    const res = await fetch(
+      `${server.url}/api/sessions/ses_a/commits/deadbeef`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { commit: { subject: string } };
+    expect(body.commit.subject).toBe("feat: do the thing");
+  });
+
+  it("404s when the sha is not recorded in the session view", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({
+      index,
+      port: 0,
+      gitDiffService: {
+        getCommit: async () => fakeCommit,
+        getFileDiff: async () => ({
+          path: "x",
+          diff: "",
+          status: "M",
+        }),
+        hasCommit: async () => true,
+      },
+    });
+
+    // Valid hex but not in ses_a's commits list.
+    const res = await fetch(
+      `${server.url}/api/sessions/ses_a/commits/abcdefab`,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("503s when the diff service isn't configured", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({ index, port: 0 });
+
+    const res = await fetch(
+      `${server.url}/api/sessions/ses_a/commits/deadbeef`,
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("returns the unified diff for a path", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({
+      index,
+      port: 0,
+      gitDiffService: {
+        getCommit: async () => fakeCommit,
+        getFileDiff: async (sha, path) => ({
+          path,
+          diff: `diff for ${sha} ${path}`,
+          status: "M",
+          insertions: 5,
+          deletions: 1,
+        }),
+        hasCommit: async () => true,
+      },
+    });
+
+    const res = await fetch(
+      `${server.url}/api/sessions/ses_a/commits/deadbeef/diff?path=${encodeURIComponent(
+        "src/foo.ts",
+      )}`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      diff: { path: string; diff: string };
+    };
+    expect(body.diff.path).toBe("src/foo.ts");
+    expect(body.diff.diff).toBe("diff for deadbeef src/foo.ts");
+  });
+
+  it("400s on diff requests with no ?path=", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({
+      index,
+      port: 0,
+      gitDiffService: {
+        getCommit: async () => fakeCommit,
+        getFileDiff: async () => ({
+          path: "x",
+          diff: "",
+          status: "M",
+        }),
+        hasCommit: async () => true,
+      },
+    });
+
+    const res = await fetch(
+      `${server.url}/api/sessions/ses_a/commits/deadbeef/diff`,
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("UiServer — static assets", () => {
   let assetsDir: string;
 

@@ -90,6 +90,61 @@ export const fetchTicketSessions = async (
 };
 
 // ---------------------------------------------------------------------------
+// Commits + diff (VGD-142)
+// ---------------------------------------------------------------------------
+
+export type FileChangeStatus = "A" | "M" | "D" | "R" | "C" | "T" | "U" | "X";
+
+export interface CommitFileChange {
+  path: string;
+  oldPath?: string;
+  status: FileChangeStatus;
+  insertions?: number;
+  deletions?: number;
+}
+
+export interface CommitMetadata {
+  sha: string;
+  parentSha?: string;
+  subject: string;
+  authorName: string;
+  authorEmail: string;
+  authorTime: number;
+  files: ReadonlyArray<CommitFileChange>;
+}
+
+export interface FileDiff {
+  path: string;
+  diff: string;
+  status: FileChangeStatus;
+  insertions?: number;
+  deletions?: number;
+}
+
+export const fetchCommit = async (
+  sessionId: string,
+  sha: string,
+): Promise<CommitMetadata> => {
+  const body = await json<{ commit: CommitMetadata }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/commits/${encodeURIComponent(sha)}`,
+  );
+  return body.commit;
+};
+
+export const fetchFileDiff = async (
+  sessionId: string,
+  sha: string,
+  path: string,
+): Promise<FileDiff> => {
+  const body = await json<{ diff: FileDiff }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/commits/${encodeURIComponent(
+      sha,
+    )}/diff?path=${encodeURIComponent(path)}`,
+  );
+  return body.diff;
+};
+
+// ---------------------------------------------------------------------------
 // WebSocket protocol (slice 8 / VGD-141)
 // ---------------------------------------------------------------------------
 

@@ -37,6 +37,7 @@ import {
 } from "node:path";
 
 import type { EventBroadcaster } from "./EventBroadcaster.js";
+import type { GitDiffService } from "./GitDiffService.js";
 import type { SessionIndex } from "./SessionIndex.js";
 import { attachWebSocket } from "./WebSocket.js";
 
@@ -53,6 +54,15 @@ export interface UiServerOptions {
    * upgrade and immediately closes (slice-7 behaviour).
    */
   readonly broadcaster?: EventBroadcaster;
+  /**
+   * Optional diff service. When provided, the server exposes
+   * `GET /api/sessions/:id/commits/:sha` and
+   * `GET /api/sessions/:id/commits/:sha/diff?path=...`. The session id gates
+   * access (the commit must appear in `view.commits`) but the underlying
+   * `git show` is rooted at one shared repo path — git's shared object DB
+   * means commits from any worktree resolve from the same root.
+   */
+  readonly gitDiffService?: GitDiffService;
   /**
    * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
    * directory is missing, the server returns a small placeholder page —
@@ -105,6 +115,7 @@ export const startUiServer = async (
     handleRequest(req, res, {
       index: opts.index,
       assetsDir,
+      gitDiffService: opts.gitDiffService,
       health: {
         application,
         version: opts.version,
@@ -303,6 +314,7 @@ export const probeExistingServer = async (
 interface HandlerCtx {
   readonly index: SessionIndex;
   readonly assetsDir?: string;
+  readonly gitDiffService?: GitDiffService;
   readonly health: HealthPayload;
 }
 
@@ -343,6 +355,27 @@ const handleRequest = async (
     return sendJson(res, 200, { session });
   }
 
+  const commitDiffMatch = pathname.match(
+    /^\/api\/sessions\/([^/]+)\/commits\/([0-9a-fA-F]{4,64})\/diff$/,
+  );
+  if (commitDiffMatch) {
+    return handleCommitDiff(res, ctx, {
+      sessionId: decodeURIComponent(commitDiffMatch[1]!),
+      sha: commitDiffMatch[2]!,
+      path: url.searchParams.get("path"),
+    });
+  }
+
+  const commitMatch = pathname.match(
+    /^\/api\/sessions\/([^/]+)\/commits\/([0-9a-fA-F]{4,64})$/,
+  );
+  if (commitMatch) {
+    return handleCommit(res, ctx, {
+      sessionId: decodeURIComponent(commitMatch[1]!),
+      sha: commitMatch[2]!,
+    });
+  }
+
   const ticketMatch = pathname.match(/^\/api\/tickets\/([^/]+)\/sessions$/);
   if (ticketMatch) {
     const ticketId = decodeURIComponent(ticketMatch[1]!);
@@ -362,6 +395,74 @@ const parseIntParam = (raw: string | null): number | null => {
   if (raw === null) return null;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) ? n : null;
+};
+
+// ---------------------------------------------------------------------------
+// Commit + diff handlers
+// ---------------------------------------------------------------------------
+
+/**
+ * The session id gates which commits a client can see — a sha must already
+ * appear in the session's `view.commits`. This stops a client that knows the
+ * UI server's port from enumerating arbitrary commits in the host repo.
+ */
+const sessionContainsCommit = (
+  ctx: HandlerCtx,
+  sessionId: string,
+  sha: string,
+): boolean => {
+  const view = ctx.index.getSession(sessionId);
+  if (!view) return false;
+  return view.commits.some((c) => c.sha === sha);
+};
+
+const handleCommit = async (
+  res: ServerResponse,
+  ctx: HandlerCtx,
+  args: { sessionId: string; sha: string },
+): Promise<void> => {
+  if (!ctx.gitDiffService) {
+    return sendError(res, 503, "git diff service not configured");
+  }
+  if (!sessionContainsCommit(ctx, args.sessionId, args.sha)) {
+    return sendError(res, 404, "commit not found in session");
+  }
+  try {
+    const commit = await ctx.gitDiffService.getCommit(args.sha);
+    return sendJson(res, 200, { commit });
+  } catch (err) {
+    return sendError(
+      res,
+      404,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+};
+
+const handleCommitDiff = async (
+  res: ServerResponse,
+  ctx: HandlerCtx,
+  args: { sessionId: string; sha: string; path: string | null },
+): Promise<void> => {
+  if (!ctx.gitDiffService) {
+    return sendError(res, 503, "git diff service not configured");
+  }
+  if (!args.path) {
+    return sendError(res, 400, "missing ?path= query parameter");
+  }
+  if (!sessionContainsCommit(ctx, args.sessionId, args.sha)) {
+    return sendError(res, 404, "commit not found in session");
+  }
+  try {
+    const diff = await ctx.gitDiffService.getFileDiff(args.sha, args.path);
+    return sendJson(res, 200, { diff });
+  } catch (err) {
+    return sendError(
+      res,
+      400,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 };
 
 // ---------------------------------------------------------------------------

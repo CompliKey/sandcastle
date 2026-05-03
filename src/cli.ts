@@ -9,6 +9,7 @@ import { styleText } from "node:util";
 
 import { createEventBroadcaster } from "./EventBroadcaster.js";
 import { createEventStore } from "./EventStore.js";
+import { createGitDiffService } from "./GitDiffService.js";
 import { createFailureCoordinator } from "./FailureCoordinator.js";
 import { startLiveEventBridge } from "./LiveEventBridge.js";
 import { runOrchestrationLoop } from "./OrchestrationLoop.js";
@@ -985,6 +986,7 @@ const uiCommand = Command.make(
         assetsDir._tag === "Some" ? assetsDir.value : defaultAssetsDir();
 
       // 3. Start the server.
+      const gitDiffService = createGitDiffService({ repoDir: cwd });
       const server = yield* Effect.tryPromise({
         try: () =>
           startUiServer({
@@ -994,6 +996,7 @@ const uiCommand = Command.make(
             port: resolvedPort,
             assetsDir: resolvedAssetsDir,
             version: VERSION,
+            gitDiffService,
           }),
         catch: (err) => {
           const isAddrInUse =

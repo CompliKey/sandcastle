@@ -28,6 +28,10 @@ export const ToolCallCard = ({ toolCall }: ToolCallCardProps): ReactElement => {
   const [collapsed, setCollapsed] = useState(true);
   const lineCount = toolCall.formattedArgs.split("\n").length;
   const isLong = lineCount > LONG_OUTPUT_LINE_THRESHOLD;
+  // Independent of the card's collapse state — when the card is open and the
+  // args are long, we still hide them behind a disclosure button. Mirrors
+  // {@link ToolCallResult}.
+  const [argsExpanded, setArgsExpanded] = useState(!isLong);
 
   return (
     <article className={`tool-card${collapsed ? " tool-card--collapsed" : ""}`}>
@@ -52,13 +56,13 @@ export const ToolCallCard = ({ toolCall }: ToolCallCardProps): ReactElement => {
       <div className="tool-card__body">
         <div>
           <div className="tool-card__section-label">Arguments</div>
-          {isLong && collapsed ? (
+          {isLong && !argsExpanded ? (
             <button
               type="button"
               className="disclosure"
               onClick={(e) => {
                 e.stopPropagation();
-                setCollapsed(false);
+                setArgsExpanded(true);
               }}
             >
               {lineCount} lines — click to expand

@@ -24,17 +24,16 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
  * Extract an error message from a parsed JSON error event.
  * Handles { error: "string" }, { error: { message: "string" } }, and { message: "string" }.
  */
-const extractErrorMessage = (obj: any): string | undefined => {
-  const err = obj.error;
+const extractErrorMessage = (obj: unknown): string | undefined => {
+  if (typeof obj !== "object" || obj === null) return undefined;
+  const record = obj as Record<string, unknown>;
+  const err = record.error;
   if (typeof err === "string") return err;
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    typeof err.message === "string"
-  ) {
-    return err.message;
+  if (typeof err === "object" && err !== null) {
+    const errMessage = (err as Record<string, unknown>).message;
+    if (typeof errMessage === "string") return errMessage;
   }
-  if (typeof obj.message === "string") return obj.message;
+  if (typeof record.message === "string") return record.message;
   return undefined;
 };
 

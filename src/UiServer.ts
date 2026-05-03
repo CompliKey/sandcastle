@@ -39,6 +39,7 @@ import {
 } from "node:path";
 
 import type { AutopilotController } from "./AutopilotController.js";
+import type { ConfigWatcher } from "./ConfigWatcher.js";
 import type {
   BacklogManagerHostInterface,
   BacklogTicket,
@@ -150,6 +151,17 @@ export interface UiServerOptions {
    */
   readonly autopilot?: AutopilotController;
   /**
+   * Optional config watcher. When provided, `/ws` upgrades subscribe to
+   * config-change events and forward each as
+   * `{ type: "config.changed", path, changedAt }`. The handshake also
+   * back-fills the current changed-files snapshot so a client connecting
+   * after a change still sees the badge.
+   *
+   * Pure passive notice — the running session is unaffected (no hot-reload,
+   * no restart). See {@link ConfigWatcher}.
+   */
+  readonly configWatcher?: ConfigWatcher;
+  /**
    * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
    * directory is missing, the server returns a small placeholder page —
    * useful in tests and during early development before the frontend is
@@ -229,7 +241,13 @@ export const startUiServer = async (
       socket.destroy();
       return;
     }
-    handleWebSocketUpgrade(req, socket, opts.index, opts.broadcaster);
+    handleWebSocketUpgrade(
+      req,
+      socket,
+      opts.index,
+      opts.broadcaster,
+      opts.configWatcher,
+    );
   });
 
   await listen(server, port, host);
@@ -278,6 +296,10 @@ const listen = (
  *    `SessionIndex` state for the session. This bootstraps the client's view.
  * 2. Subscribe to the broadcaster's `session:<id>` channel and forward each
  *    matching event as `{ type: "event", event }`.
+ * 3. If a `configWatcher` is provided, also forward any
+ *    `{ type: "config.changed", path, changedAt }` notifications. The
+ *    snapshot phase back-fills the current changed-files set so a client
+ *    connecting after a change still sees the badge.
  * If the session id is unknown, send `{ type: "error", reason: ... }` and
  * close — the client decides whether to retry or fall back to REST.
  *
@@ -289,6 +311,7 @@ const handleWebSocketUpgrade = (
   socket: import("node:stream").Duplex,
   index: SessionIndex,
   broadcaster: EventBroadcaster | undefined,
+  configWatcher: ConfigWatcher | undefined,
 ): void => {
   const url = new URL(req.url ?? "/ws", "http://localhost");
   const sessionId = url.searchParams.get("session");
@@ -346,8 +369,34 @@ const handleWebSocketUpgrade = (
   }
   buffered.length = 0;
 
+  // Config-watcher fan-in. Backfill any pre-existing changes immediately
+  // after the snapshot so a client that connects after a change still gets
+  // the badge, then subscribe for the rest of the connection's lifetime.
+  let unsubscribeConfig: (() => void) | undefined;
+  if (configWatcher) {
+    for (const change of configWatcher.getChangedFiles()) {
+      conn.send(
+        JSON.stringify({
+          type: "config.changed",
+          path: change.path,
+          changedAt: change.changedAt,
+        }),
+      );
+    }
+    unsubscribeConfig = configWatcher.subscribe((change) => {
+      conn.send(
+        JSON.stringify({
+          type: "config.changed",
+          path: change.path,
+          changedAt: change.changedAt,
+        }),
+      );
+    });
+  }
+
   conn.onClose(() => {
     unsubscribe();
+    unsubscribeConfig?.();
   });
 };
 

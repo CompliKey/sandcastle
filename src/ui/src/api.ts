@@ -412,7 +412,22 @@ export type SandcastleEvent =
     })
   | (EventBase & { type: "user.log"; sessionId: string; payload: unknown });
 
+/**
+ * Pushed by the server when a watched file in `.sandcastle/` (config or
+ * prompt template) changes after the UI server started. Pure passive notice
+ * — the running session is unaffected. The frontend renders a badge on the
+ * live session view; historical sessions ignore these messages.
+ */
+export interface ConfigChangedMessage {
+  type: "config.changed";
+  /** Absolute path of the file that changed. */
+  path: string;
+  /** Wall-clock change time (ms since epoch). */
+  changedAt: number;
+}
+
 export type LiveMessage =
   | { type: "snapshot"; view: SessionView }
   | { type: "event"; event: SandcastleEvent }
+  | ConfigChangedMessage
   | { type: "error"; reason: string };

@@ -1,11 +1,17 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildSessionIndex } from "./SessionIndex.js";
+import type {
+  BacklogManagerHostInterface,
+  BacklogTicket,
+} from "./defineSandcastle.js";
 import type { SandcastleEvent } from "./EventStore.js";
+import type { ScenarioRunResult } from "./ScenarioRunner.js";
 import {
+  type RunScenarioRequestFn,
   type UiServer,
   probeExistingServer,
   startUiServer,
@@ -415,5 +421,262 @@ describe("probeExistingServer", () => {
 
     const probed = await probeExistingServer(server.url);
     expect(probed).toBeNull();
+  });
+});
+
+const ticket = (overrides: Partial<BacklogTicket> = {}): BacklogTicket => ({
+  id: overrides.id ?? "VGD-200",
+  title: overrides.title ?? "Implement thing",
+  body: overrides.body ?? "",
+  labels: overrides.labels ?? [],
+  url: overrides.url ?? "https://jira.example/browse/VGD-200",
+  ...(overrides.priority !== undefined ? { priority: overrides.priority } : {}),
+  ...(overrides.createdAt !== undefined
+    ? { createdAt: overrides.createdAt }
+    : {}),
+});
+
+const fakeBacklogManager = (
+  tickets: readonly BacklogTicket[],
+): BacklogManagerHostInterface => ({
+  listPending: async () => tickets,
+  getTicket: async (id) => {
+    const t = tickets.find((x) => x.id === id);
+    if (!t) throw new Error(`unknown ticket ${id}`);
+    return t;
+  },
+  markErrored: async () => {},
+  clearErrored: async () => {},
+});
+
+describe("UiServer — GET /api/queue", () => {
+  it("returns 503 when no backlog manager is configured", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({ index, port: 0 });
+    const res = await fetch(`${server.url}/api/queue`);
+    expect(res.status).toBe(503);
+  });
+
+  it("lists pending tickets in backlog-manager order", async () => {
+    const index = buildSessionIndex([]);
+    const backlogManager = fakeBacklogManager([
+      ticket({ id: "VGD-201", title: "First", priority: "High" }),
+      ticket({ id: "VGD-202", title: "Second" }),
+    ]);
+    server = await startUiServer({ index, port: 0, backlogManager });
+
+    const res = await fetch(`${server.url}/api/queue`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      tickets: Array<{ id: string; title: string; priority?: string }>;
+    };
+    expect(body.tickets.map((t) => t.id)).toEqual(["VGD-201", "VGD-202"]);
+    expect(body.tickets[0]!.priority).toBe("High");
+    expect(body.tickets[1]!.priority).toBeUndefined();
+  });
+
+  it("forwards listPending failures as 502", async () => {
+    const index = buildSessionIndex([]);
+    const backlogManager: BacklogManagerHostInterface = {
+      listPending: async () => {
+        throw new Error("upstream down");
+      },
+      getTicket: async () => ticket(),
+      markErrored: async () => {},
+      clearErrored: async () => {},
+    };
+    server = await startUiServer({ index, port: 0, backlogManager });
+    const res = await fetch(`${server.url}/api/queue`);
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("upstream down");
+  });
+});
+
+describe("UiServer — GET /api/scenarios", () => {
+  it("returns the scenarios catalogue when configured", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [
+        { name: "default-claude-code", maxIterations: 12 },
+        { name: "verify-only", description: "Run tests only" },
+      ],
+    });
+    const res = await fetch(`${server.url}/api/scenarios`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      scenarios: Array<{
+        name: string;
+        maxIterations?: number;
+        description?: string;
+      }>;
+    };
+    expect(body.scenarios.map((s) => s.name)).toEqual([
+      "default-claude-code",
+      "verify-only",
+    ]);
+    expect(body.scenarios[0]!.maxIterations).toBe(12);
+    expect(body.scenarios[1]!.description).toBe("Run tests only");
+  });
+
+  it("returns an empty list when scenarios is unset", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({ index, port: 0 });
+    const res = await fetch(`${server.url}/api/scenarios`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scenarios: unknown[] };
+    expect(body.scenarios).toEqual([]);
+  });
+});
+
+describe("UiServer — POST /api/run-scenario", () => {
+  const post = (url: string, body: unknown): Promise<Response> =>
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const startedFor = (
+    sessionId: string,
+  ): Promise<{
+    sessionId: string;
+    done: Promise<ScenarioRunResult>;
+  }> =>
+    Promise.resolve({
+      sessionId,
+      done: Promise.resolve<ScenarioRunResult>({
+        sessionId,
+        outcome: "done",
+        exitCode: 0,
+        signal: null,
+      }),
+    });
+
+  it("returns 503 when no runScenario adapter is configured", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({ index, port: 0 });
+    const res = await post(`${server.url}/api/run-scenario`, {
+      scenario: "x",
+      ticketId: "VGD-1",
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("starts a run and returns 202 with the allocated sessionId", async () => {
+    const index = buildSessionIndex([]);
+    const runScenario = vi.fn<RunScenarioRequestFn>(() => startedFor("ses_x"));
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [{ name: "default-claude-code" }],
+      runScenario,
+    });
+
+    const res = await post(`${server.url}/api/run-scenario`, {
+      scenario: "default-claude-code",
+      ticketId: "VGD-200",
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { sessionId: string };
+    expect(body.sessionId).toBe("ses_x");
+    expect(runScenario).toHaveBeenCalledWith({
+      scenario: "default-claude-code",
+      ticketId: "VGD-200",
+    });
+  });
+
+  it("forwards overrides verbatim to the adapter", async () => {
+    const index = buildSessionIndex([]);
+    const runScenario = vi.fn<RunScenarioRequestFn>(() =>
+      startedFor("ses_overrides"),
+    );
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [{ name: "default-claude-code" }],
+      runScenario,
+    });
+
+    const overrides = {
+      maxIterations: 5,
+      model: "claude-sonnet-4-6",
+      promptArgs: { focusFiles: ["a.ts"] },
+    };
+    const res = await post(`${server.url}/api/run-scenario`, {
+      scenario: "default-claude-code",
+      ticketId: "VGD-200",
+      overrides,
+    });
+    expect(res.status).toBe(202);
+    expect(runScenario).toHaveBeenCalledWith({
+      scenario: "default-claude-code",
+      ticketId: "VGD-200",
+      overrides,
+    });
+  });
+
+  it("rejects unknown scenario names against the configured catalogue", async () => {
+    const index = buildSessionIndex([]);
+    const runScenario = vi.fn<RunScenarioRequestFn>(() => startedFor("unused"));
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [{ name: "default-claude-code" }],
+      runScenario,
+    });
+    const res = await post(`${server.url}/api/run-scenario`, {
+      scenario: "nope",
+      ticketId: "VGD-200",
+    });
+    expect(res.status).toBe(400);
+    expect(runScenario).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed overrides", async () => {
+    const index = buildSessionIndex([]);
+    const runScenario = vi.fn<RunScenarioRequestFn>(() => startedFor("unused"));
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [{ name: "x" }],
+      runScenario,
+    });
+
+    // maxIterations must be a positive integer.
+    const r1 = await post(`${server.url}/api/run-scenario`, {
+      scenario: "x",
+      ticketId: "VGD-1",
+      overrides: { maxIterations: 0 },
+    });
+    expect(r1.status).toBe(400);
+
+    // promptArgs must be a plain object, not an array.
+    const r2 = await post(`${server.url}/api/run-scenario`, {
+      scenario: "x",
+      ticketId: "VGD-1",
+      overrides: { promptArgs: ["nope"] },
+    });
+    expect(r2.status).toBe(400);
+
+    expect(runScenario).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 on invalid JSON", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({
+      index,
+      port: 0,
+      scenarios: [{ name: "x" }],
+      runScenario: () => startedFor("unused"),
+    });
+    const res = await fetch(`${server.url}/api/run-scenario`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
   });
 });

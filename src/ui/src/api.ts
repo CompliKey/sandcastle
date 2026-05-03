@@ -90,6 +90,78 @@ export const fetchTicketSessions = async (
 };
 
 // ---------------------------------------------------------------------------
+// Queue + manual run-scenario (VGD-143)
+// ---------------------------------------------------------------------------
+
+export interface QueueTicket {
+  id: string;
+  title: string;
+  body: string;
+  labels: ReadonlyArray<string>;
+  url: string;
+  priority?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ScenarioOption {
+  name: string;
+  description?: string;
+  maxIterations?: number;
+}
+
+export interface ScenarioOverrides {
+  maxIterations?: number;
+  model?: string;
+  promptArgs?: Record<string, unknown>;
+}
+
+export interface RunScenarioBody {
+  scenario: string;
+  ticketId: string;
+  overrides?: ScenarioOverrides;
+}
+
+export const fetchQueue = async (): Promise<QueueTicket[]> => {
+  const body = await json<{ tickets: QueueTicket[] }>("/api/queue");
+  return body.tickets;
+};
+
+export const fetchScenarios = async (): Promise<ScenarioOption[]> => {
+  const body = await json<{ scenarios: ScenarioOption[] }>("/api/scenarios");
+  return body.scenarios;
+};
+
+/**
+ * POST /api/run-scenario. Resolves with the allocated `sessionId` so the
+ * caller can navigate to the live session view immediately. Rejects with the
+ * server's error string for any 4xx/5xx response.
+ */
+export const runScenarioRequest = async (
+  body: RunScenarioBody,
+): Promise<{ sessionId: string }> => {
+  const res = await fetch("/api/run-scenario", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody.error) detail = errBody.error;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(`run-scenario failed: ${detail}`);
+  }
+  return (await res.json()) as { sessionId: string };
+};
+
+// ---------------------------------------------------------------------------
 // Commits + diff (VGD-142)
 // ---------------------------------------------------------------------------
 

@@ -23,6 +23,7 @@ import type {
   SandboxRunResult,
 } from "./createSandbox.js";
 import { createSandbox as realCreateSandbox } from "./createSandbox.js";
+import type { ScenarioOverrides } from "./defineSandcastle.js";
 import { interactive as realInteractive } from "./interactive.js";
 import type { InteractiveOptions } from "./interactive.js";
 import { run as realRun } from "./run.js";
@@ -53,6 +54,55 @@ export const defaultIpcSender: IpcSender = (msg) => {
 export const isInScenarioChild = (): boolean =>
   process.env[SCENARIO_ENV.ipcMode] === "1" &&
   typeof process.send === "function";
+
+/**
+ * Parse the JSON-encoded overrides forwarded by the parent (or the env passed
+ * to a test-mode wiring call). Returns `{}` if absent or unparseable — a
+ * malformed env should not crash the run; the operator's intent for "no
+ * overrides" should be preserved.
+ */
+export const readScenarioOverrides = (
+  env: NodeJS.ProcessEnv = process.env,
+): ScenarioOverrides => {
+  const raw = env[SCENARIO_ENV.overrides];
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return {};
+    return parsed as ScenarioOverrides;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Auto-applied overrides on `RunOptions` / `SandboxRunOptions`:
+ *  - `maxIterations` replaces the scenario value.
+ *  - `promptArgs` is shallow-merged with the scenario's, manual wins.
+ *
+ * `model` is intentionally left to the scenario to consume from
+ * `ctx.overrides.model` when constructing its agent provider.
+ */
+const applyOverridesToRunOptions = <
+  T extends {
+    readonly maxIterations?: number;
+    readonly promptArgs?: Record<string, unknown>;
+  },
+>(
+  opts: T,
+  overrides: ScenarioOverrides,
+): T => {
+  const maxIterations = overrides.maxIterations ?? opts.maxIterations;
+  const promptArgs =
+    overrides.promptArgs && Object.keys(overrides.promptArgs).length > 0
+      ? { ...(opts.promptArgs ?? {}), ...overrides.promptArgs }
+      : opts.promptArgs;
+  return {
+    ...opts,
+    ...(maxIterations !== undefined ? { maxIterations } : {}),
+    ...(promptArgs !== undefined ? { promptArgs } : {}),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Iteration-boundary tracker
@@ -172,27 +222,33 @@ export interface WireDeps {
   readonly send?: IpcSender;
   readonly signal?: AbortSignal;
   readonly active?: () => boolean;
+  /**
+   * Per-invocation overrides. Defaults to reading
+   * {@link readScenarioOverrides} from `process.env` so production code does
+   * not need to pass them explicitly. Tests can inject `{}` to bypass env.
+   */
+  readonly overrides?: ScenarioOverrides;
   /** Test seams. */
   readonly _runImpl?: typeof realRun;
   readonly _createSandboxImpl?: typeof realCreateSandbox;
   readonly _interactiveImpl?: typeof realInteractive;
 }
 
-const resolveDeps = (
-  deps: WireDeps | undefined,
-): Required<
-  Omit<
-    WireDeps,
-    "_runImpl" | "_createSandboxImpl" | "_interactiveImpl" | "signal"
-  >
-> &
-  Pick<
-    WireDeps,
-    "_runImpl" | "_createSandboxImpl" | "_interactiveImpl" | "signal"
-  > => ({
+interface ResolvedDeps {
+  readonly send: IpcSender;
+  readonly active: () => boolean;
+  readonly signal: AbortSignal | undefined;
+  readonly overrides: ScenarioOverrides;
+  readonly _runImpl?: typeof realRun;
+  readonly _createSandboxImpl?: typeof realCreateSandbox;
+  readonly _interactiveImpl?: typeof realInteractive;
+}
+
+const resolveDeps = (deps: WireDeps | undefined): ResolvedDeps => ({
   send: deps?.send ?? defaultIpcSender,
   active: deps?.active ?? isInScenarioChild,
   signal: deps?.signal,
+  overrides: deps?.overrides ?? readScenarioOverrides(),
   _runImpl: deps?._runImpl,
   _createSandboxImpl: deps?._createSandboxImpl,
   _interactiveImpl: deps?._interactiveImpl,
@@ -205,8 +261,9 @@ export const wireRun = (deps?: WireDeps) => {
     if (!d.active()) return impl(options);
     const tracker = createIterationBoundaryTracker(d.send);
     try {
+      const overridden = applyOverridesToRunOptions(options, d.overrides);
       const result = await impl({
-        ...options,
+        ...overridden,
         signal: options.signal ?? d.signal,
         logging: ipcLogging(options.logging, tracker.onEvent),
       });
@@ -223,7 +280,7 @@ export const wireCreateSandbox = (deps?: WireDeps) => {
   return async (options: CreateSandboxOptions): Promise<Sandbox> => {
     if (!d.active()) return impl(options);
     const sandbox = await impl(options);
-    return wrapSandbox(sandbox, d.send, d.signal);
+    return wrapSandbox(sandbox, d.send, d.signal, d.overrides);
   };
 };
 
@@ -243,13 +300,15 @@ const wrapSandbox = (
   sandbox: Sandbox,
   send: IpcSender,
   signal: AbortSignal | undefined,
+  overrides: ScenarioOverrides,
 ): Sandbox => ({
   ...sandbox,
   run: async (opts: SandboxRunOptions): Promise<SandboxRunResult> => {
     const tracker = createIterationBoundaryTracker(send);
     try {
+      const overridden = applyOverridesToRunOptions(opts, overrides);
       const result = await sandbox.run({
-        ...opts,
+        ...overridden,
         signal: opts.signal ?? signal,
         logging: ipcLogging(opts.logging, tracker.onEvent),
       });

@@ -3,6 +3,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
@@ -20,6 +21,8 @@ import {
   DEFAULT_UI_PORT,
   probeExistingServer,
   startUiServer,
+  type RunScenarioStarted,
+  type ScenarioOption,
 } from "./UiServer.js";
 import { readLockfile, removeLockfile, writeLockfile } from "./UiLockfile.js";
 import { openBrowser } from "./openBrowser.js";
@@ -944,6 +947,32 @@ const uiCommand = Command.make(
       const stateDir = resolvePath(cwd, ".sandcastle", "state");
       const resolvedHost = host._tag === "Some" ? host.value : DEFAULT_UI_HOST;
       const resolvedPort = port._tag === "Some" ? port.value : DEFAULT_UI_PORT;
+      const configPath = join(cwd, DEFAULT_CONFIG_PATH);
+
+      // Optional: load the sandcastle config so the UI can offer the queue
+      // view + manual-mode invocations. If the config is missing or invalid
+      // the UI server still starts (history-only); the queue and
+      // run-scenario endpoints return 503.
+      const loadedConfigEither = yield* Effect.either(
+        loadSandcastleConfig(configPath),
+      );
+      let backlogManager:
+        | import("./defineSandcastle.js").BacklogManagerHostInterface
+        | undefined;
+      let scenarioOptions: ScenarioOption[] | undefined;
+      if (loadedConfigEither._tag === "Right") {
+        const loaded = loadedConfigEither.right;
+        backlogManager = loaded.backlogManager;
+        scenarioOptions = loaded.metadata.scenarios.map((s) => ({
+          name: s.name,
+          ...(s.description !== undefined
+            ? { description: s.description }
+            : {}),
+          ...(s.maxIterations !== undefined
+            ? { maxIterations: s.maxIterations }
+            : {}),
+        }));
+      }
 
       // 1. Single-instance hand-off via the lockfile + health probe.
       const existing = yield* Effect.promise(() => readLockfile(stateDir));
@@ -987,6 +1016,33 @@ const uiCommand = Command.make(
 
       // 3. Start the server.
       const gitDiffService = createGitDiffService({ repoDir: cwd });
+
+      // Manual-invocation adapter: allocates a sessionId synchronously and
+      // returns it to the caller while the scenario continues in the
+      // background. Errors that occur after fork are observable via the
+      // EventStore (session.end / error events) — there is no HTTP channel
+      // back to the client past the initial 202.
+      const manualRunAc = new AbortController();
+      const runScenarioRequest = (
+        request: import("./UiServer.js").RunScenarioRequest,
+      ): Promise<RunScenarioStarted> => {
+        const sessionId = randomUUID();
+        const meta = scenarioOptions?.find((s) => s.name === request.scenario);
+        const done = runScenario({
+          scenario: request.scenario,
+          ticketId: request.ticketId,
+          configPath,
+          store,
+          signal: manualRunAc.signal,
+          sessionId,
+          maxIterations: meta?.maxIterations,
+          ...(request.overrides !== undefined
+            ? { overrides: request.overrides }
+            : {}),
+        });
+        return Promise.resolve({ sessionId, done });
+      };
+
       const server = yield* Effect.tryPromise({
         try: () =>
           startUiServer({
@@ -997,6 +1053,13 @@ const uiCommand = Command.make(
             assetsDir: resolvedAssetsDir,
             version: VERSION,
             gitDiffService,
+            ...(backlogManager !== undefined ? { backlogManager } : {}),
+            ...(scenarioOptions !== undefined
+              ? { scenarios: scenarioOptions }
+              : {}),
+            ...(backlogManager !== undefined
+              ? { runScenario: runScenarioRequest }
+              : {}),
           }),
         catch: (err) => {
           const isAddrInUse =
@@ -1026,7 +1089,12 @@ const uiCommand = Command.make(
 
       // 5. Wire signal handlers + foreground await.
       const shutdownSignal = new AbortController();
-      const onSignal = (): void => shutdownSignal.abort();
+      const onSignal = (): void => {
+        shutdownSignal.abort();
+        // Forward to in-flight manual scenario runs so SIGTERM cleanly
+        // halts them alongside autopilot.
+        manualRunAc.abort();
+      };
       process.once("SIGTERM", onSignal);
       process.once("SIGINT", onSignal);
 

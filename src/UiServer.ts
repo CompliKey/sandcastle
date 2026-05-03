@@ -36,14 +36,71 @@ import {
   sep,
 } from "node:path";
 
+import type {
+  BacklogManagerHostInterface,
+  BacklogTicket,
+  ScenarioOverrides,
+} from "./defineSandcastle.js";
 import type { EventBroadcaster } from "./EventBroadcaster.js";
 import type { GitDiffService } from "./GitDiffService.js";
+import type { ScenarioRunResult } from "./ScenarioRunner.js";
 import type { SessionIndex } from "./SessionIndex.js";
 import { attachWebSocket } from "./WebSocket.js";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+/**
+ * Argument shape for {@link RunScenarioRequestFn}. Mirrors the
+ * `POST /api/run-scenario` body — the server does basic shape validation
+ * and forwards the request to the host-provided handler, which closes over
+ * `configPath` / `EventStore` / `signal`.
+ */
+export interface RunScenarioRequest {
+  readonly scenario: string;
+  readonly ticketId: string;
+  readonly overrides?: ScenarioOverrides;
+}
+
+/**
+ * Resolved shape of {@link RunScenarioRequestFn}: the allocated session id is
+ * surfaced as soon as the run is admitted (so the UI can navigate to the
+ * live view), while the long-running scenario continues in the background
+ * via `done`.
+ */
+export interface RunScenarioStarted {
+  readonly sessionId: string;
+  /**
+   * Settles when the underlying scenario run completes. The UI server does
+   * not block on this — it attaches a `.catch(() => {})` so a rejection
+   * does not become an unhandled promise rejection.
+   */
+  readonly done: Promise<ScenarioRunResult>;
+}
+
+/**
+ * Adapter the UI server calls to start a manual single-ticket invocation.
+ * The CLI binds this to a closure over `configPath`, the shared `EventStore`,
+ * and a long-lived shutdown signal. Manual runs work whether autopilot is
+ * ON or OFF — they share the EventStore but spawn an independent child.
+ *
+ * The adapter must allocate `sessionId` *before* returning so the UI can
+ * navigate to the live view immediately.
+ */
+export type RunScenarioRequestFn = (
+  request: RunScenarioRequest,
+) => Promise<RunScenarioStarted>;
+
+/**
+ * Per-scenario metadata exposed to the UI so it can populate the override
+ * sheet ("Scenario default: 12") and validate the chosen scenario name.
+ */
+export interface ScenarioOption {
+  readonly name: string;
+  readonly description?: string;
+  readonly maxIterations?: number;
+}
 
 export interface UiServerOptions {
   readonly index: SessionIndex;
@@ -63,6 +120,25 @@ export interface UiServerOptions {
    * means commits from any worktree resolve from the same root.
    */
   readonly gitDiffService?: GitDiffService;
+  /**
+   * Optional backlog manager. When provided, `GET /api/queue` lists pending
+   * tickets via {@link BacklogManagerHostInterface.listPending}. Without it,
+   * the queue endpoint returns 503 — the rest of the server still works for
+   * read-only history viewing.
+   */
+  readonly backlogManager?: BacklogManagerHostInterface;
+  /**
+   * Optional manual-invocation adapter. When provided,
+   * `POST /api/run-scenario` triggers a single-ticket run. Without it, the
+   * endpoint returns 503.
+   */
+  readonly runScenario?: RunScenarioRequestFn;
+  /**
+   * Optional scenario catalogue surfaced at `GET /api/scenarios`. Lets the
+   * frontend populate the override sheet's scenario picker and look up the
+   * "Scenario default" maxIterations.
+   */
+  readonly scenarios?: readonly ScenarioOption[];
   /**
    * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
    * directory is missing, the server returns a small placeholder page —
@@ -116,6 +192,9 @@ export const startUiServer = async (
       index: opts.index,
       assetsDir,
       gitDiffService: opts.gitDiffService,
+      backlogManager: opts.backlogManager,
+      runScenario: opts.runScenario,
+      scenarios: opts.scenarios,
       health: {
         application,
         version: opts.version,
@@ -315,6 +394,9 @@ interface HandlerCtx {
   readonly index: SessionIndex;
   readonly assetsDir?: string;
   readonly gitDiffService?: GitDiffService;
+  readonly backlogManager?: BacklogManagerHostInterface;
+  readonly runScenario?: RunScenarioRequestFn;
+  readonly scenarios?: readonly ScenarioOption[];
   readonly health: HealthPayload;
 }
 
@@ -325,17 +407,34 @@ const handleRequest = async (
 ): Promise<void> => {
   if (!req.url) return sendError(res, 400, "missing url");
   const method = req.method ?? "GET";
-  if (method !== "GET" && method !== "HEAD") {
-    return sendError(res, 405, "method not allowed");
-  }
 
   // URL parsing — the host header isn't always trustworthy, but for query
   // string handling a placeholder origin is fine.
   const url = new URL(req.url, "http://localhost");
   const { pathname } = url;
 
+  // POST is restricted to the manual-invocation endpoint. Everything else is
+  // read-only.
+  if (method === "POST") {
+    if (pathname === "/api/run-scenario") {
+      return handleRunScenario(req, res, ctx);
+    }
+    return sendError(res, 405, "method not allowed");
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    return sendError(res, 405, "method not allowed");
+  }
+
   if (pathname === "/api/health") {
     return sendJson(res, 200, ctx.health);
+  }
+
+  if (pathname === "/api/queue") {
+    return handleQueue(res, ctx, url);
+  }
+
+  if (pathname === "/api/scenarios") {
+    return sendJson(res, 200, { scenarios: ctx.scenarios ?? [] });
   }
 
   if (pathname === "/api/sessions") {
@@ -464,6 +563,218 @@ const handleCommitDiff = async (
     );
   }
 };
+
+// ---------------------------------------------------------------------------
+// Queue + run-scenario handlers
+// ---------------------------------------------------------------------------
+
+const handleQueue = async (
+  res: ServerResponse,
+  ctx: HandlerCtx,
+  url: URL,
+): Promise<void> => {
+  if (!ctx.backlogManager) {
+    return sendError(res, 503, "backlog manager not configured");
+  }
+  const includeErrored = url.searchParams.get("includeErrored") === "true";
+  try {
+    const tickets = await ctx.backlogManager.listPending({ includeErrored });
+    return sendJson(res, 200, { tickets: tickets.map(serializeTicket) });
+  } catch (err) {
+    return sendError(
+      res,
+      502,
+      `listPending failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+};
+
+const serializeTicket = (
+  t: BacklogTicket,
+): {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly url: string;
+  readonly priority?: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+} => ({
+  id: t.id,
+  title: t.title,
+  body: t.body,
+  labels: [...t.labels],
+  url: t.url,
+  ...(t.priority !== undefined ? { priority: t.priority } : {}),
+  ...(t.createdAt !== undefined ? { createdAt: t.createdAt } : {}),
+  ...(t.updatedAt !== undefined ? { updatedAt: t.updatedAt } : {}),
+});
+
+/**
+ * Body cap for `POST /api/run-scenario`. The intent is to reject pathological
+ * payloads cheaply, not to enforce a meaningful limit on `promptArgs` — 256KB
+ * is far more than any realistic override.
+ */
+const RUN_SCENARIO_MAX_BODY_BYTES = 256 * 1024;
+
+const handleRunScenario = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: HandlerCtx,
+): Promise<void> => {
+  if (!ctx.runScenario) {
+    return sendError(res, 503, "manual run-scenario not configured");
+  }
+
+  let raw: string;
+  try {
+    raw = await readRequestBody(req, RUN_SCENARIO_MAX_BODY_BYTES);
+  } catch (err) {
+    return sendError(
+      res,
+      413,
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = raw.length === 0 ? {} : JSON.parse(raw);
+  } catch {
+    return sendError(res, 400, "request body must be valid JSON");
+  }
+
+  const validation = parseRunScenarioBody(parsed, ctx.scenarios);
+  if (!validation.ok) {
+    return sendError(res, 400, validation.error);
+  }
+
+  let started: RunScenarioStarted;
+  try {
+    started = await ctx.runScenario(validation.request);
+  } catch (err) {
+    return sendError(
+      res,
+      500,
+      `runScenario rejected: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Detach the long-running scenario from the HTTP request: the client
+  // receives the sessionId immediately and navigates to the live view, which
+  // subscribes via `/ws`. Attach a noop `.catch` so a downstream rejection
+  // does not become an unhandled promise rejection.
+  void started.done.catch(() => {});
+
+  return sendJson(res, 202, { sessionId: started.sessionId });
+};
+
+interface ParsedRunScenarioBody {
+  readonly ok: true;
+  readonly request: RunScenarioRequest;
+}
+interface ParsedRunScenarioError {
+  readonly ok: false;
+  readonly error: string;
+}
+
+const parseRunScenarioBody = (
+  body: unknown,
+  scenarios: readonly ScenarioOption[] | undefined,
+): ParsedRunScenarioBody | ParsedRunScenarioError => {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "body must be a JSON object" };
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.scenario !== "string" || b.scenario.length === 0) {
+    return { ok: false, error: "scenario must be a non-empty string" };
+  }
+  if (typeof b.ticketId !== "string" || b.ticketId.length === 0) {
+    return { ok: false, error: "ticketId must be a non-empty string" };
+  }
+  if (scenarios && !scenarios.some((s) => s.name === b.scenario)) {
+    const available = scenarios.map((s) => s.name).join(", ");
+    return {
+      ok: false,
+      error: `unknown scenario "${b.scenario}". Available: ${available || "(none)"}.`,
+    };
+  }
+  let overrides: ScenarioOverrides | undefined;
+  if (b.overrides !== undefined) {
+    if (typeof b.overrides !== "object" || b.overrides === null) {
+      return { ok: false, error: "overrides must be an object" };
+    }
+    const o = b.overrides as Record<string, unknown>;
+    overrides = {};
+    if (o.maxIterations !== undefined) {
+      if (
+        typeof o.maxIterations !== "number" ||
+        !Number.isInteger(o.maxIterations) ||
+        o.maxIterations < 1
+      ) {
+        return {
+          ok: false,
+          error: "overrides.maxIterations must be a positive integer",
+        };
+      }
+      overrides = { ...overrides, maxIterations: o.maxIterations };
+    }
+    if (o.model !== undefined) {
+      if (typeof o.model !== "string" || o.model.length === 0) {
+        return {
+          ok: false,
+          error: "overrides.model must be a non-empty string",
+        };
+      }
+      overrides = { ...overrides, model: o.model };
+    }
+    if (o.promptArgs !== undefined) {
+      if (
+        typeof o.promptArgs !== "object" ||
+        o.promptArgs === null ||
+        Array.isArray(o.promptArgs)
+      ) {
+        return {
+          ok: false,
+          error: "overrides.promptArgs must be a plain JSON object",
+        };
+      }
+      overrides = {
+        ...overrides,
+        promptArgs: o.promptArgs as Record<string, unknown>,
+      };
+    }
+  }
+  return {
+    ok: true,
+    request: {
+      scenario: b.scenario,
+      ticketId: b.ticketId,
+      ...(overrides !== undefined ? { overrides } : {}),
+    },
+  };
+};
+
+const readRequestBody = (
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new Error(`request body exceeds ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
 
 // ---------------------------------------------------------------------------
 // Static asset serving

@@ -23,6 +23,7 @@ import { fork, type ChildProcess, type ForkOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
+import type { ScenarioOverrides } from "./defineSandcastle.js";
 import type { EventStore, SessionOutcome } from "./EventStore.js";
 import {
   buildSessionEndEvent,
@@ -82,6 +83,17 @@ export interface ScenarioRunnerOptions {
    * `session.start` event so the UI can show `iteration / max`.
    */
   readonly maxIterations?: number;
+  /**
+   * Per-invocation overrides set by manual-mode UI runs. Forwarded to the
+   * child via env (JSON) and surfaced as `ctx.overrides`. Omit or pass `{}`
+   * for autopilot.
+   *
+   * The `maxIterations` field here is what the scenario actually runs with;
+   * the top-level `maxIterations` option above is the *display* default and
+   * is overridden for the `session.start` event when this is set, so the UI
+   * shows `iteration / overrideMax` rather than the stale scenario default.
+   */
+  readonly overrides?: ScenarioOverrides;
 }
 
 export interface ScenarioRunResult {
@@ -112,6 +124,11 @@ export const runScenario = async (
   const stdio: ForkOptions["stdio"] = options.stdio ?? "inherit";
   const forkImpl = options.fork ?? fork;
 
+  // Manual maxIterations override wins for the `session.start` display value
+  // too — otherwise the live UI would show the stale scenario default.
+  const effectiveMaxIterations =
+    options.overrides?.maxIterations ?? options.maxIterations;
+
   await options.store.append(
     buildSessionStartEvent({
       sessionId,
@@ -119,9 +136,14 @@ export const runScenario = async (
       ticketId: options.ticketId,
       scenario: options.scenario,
       startedAt: clock(),
-      maxIterations: options.maxIterations,
+      maxIterations: effectiveMaxIterations,
     }),
   );
+
+  const overridesEnv =
+    options.overrides && Object.keys(options.overrides).length > 0
+      ? { [SCENARIO_ENV.overrides]: JSON.stringify(options.overrides) }
+      : {};
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -132,6 +154,7 @@ export const runScenario = async (
     [SCENARIO_ENV.sessionId]: sessionId,
     [SCENARIO_ENV.laneId]: laneId,
     [SCENARIO_ENV.ipcMode]: "1",
+    ...overridesEnv,
   };
 
   // Track every append we kick off so we can flush before emitting session.end.

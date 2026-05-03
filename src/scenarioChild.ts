@@ -25,6 +25,7 @@ import { SCENARIO_ENV } from "./scenarioIpcProtocol.js";
 import {
   defaultIpcSender,
   isInScenarioChild,
+  readScenarioOverrides,
   wireCreateSandbox,
   wireInteractive,
   wireRun,
@@ -123,14 +124,19 @@ export const runScenarioChild = async (): Promise<void> => {
     send({ kind: "user.log", event, data });
   };
 
+  // Read once so all wired helpers and ctx.overrides agree on the same
+  // snapshot — env mutations mid-run would otherwise diverge them.
+  const overrides = readScenarioOverrides();
+
   const ctx: ScenarioContext<ScenarioInput> = {
     input: scenario.input,
     ticket: { id: ticket.id, title: ticket.title },
-    run: wireRun({ signal: ac.signal }),
-    createSandbox: wireCreateSandbox({ signal: ac.signal }),
-    interactive: wireInteractive({ signal: ac.signal }),
+    run: wireRun({ signal: ac.signal, overrides }),
+    createSandbox: wireCreateSandbox({ signal: ac.signal, overrides }),
+    interactive: wireInteractive({ signal: ac.signal, overrides }),
     signal: ac.signal,
     log,
+    overrides,
   };
 
   try {

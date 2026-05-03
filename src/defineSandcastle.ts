@@ -123,6 +123,28 @@ export type ScenarioLogFn = (
 ) => void;
 
 /**
+ * Per-invocation overrides supplied by a manual UI run.
+ *
+ * Two of the three fields are auto-applied by the scenario-ctx wiring layer:
+ *
+ *  - `maxIterations` replaces whatever value the scenario passes to
+ *    `ctx.run({ maxIterations })`.
+ *  - `promptArgs` is shallow-merged with the scenario's `promptArgs`; manual
+ *    keys win on conflict.
+ *
+ * `model` is **not** auto-applied because agent providers are constructed up
+ * front (e.g. `claudeCode("claude-opus-4-7")`) and the wiring layer does not
+ * know how to rebuild a provider with a different model. Scenarios that want
+ * to honour the model override must read `ctx.overrides.model` themselves and
+ * pass it into their provider factory.
+ */
+export interface ScenarioOverrides {
+  readonly maxIterations?: number;
+  readonly model?: string;
+  readonly promptArgs?: Record<string, unknown>;
+}
+
+/**
  * The `ctx` passed to a scenario's `run`. Pre-wired plumbing means user code
  * does not have to instantiate `run`/`createSandbox`/`interactive` itself or
  * thread `signal`/`logging` through manually.
@@ -139,6 +161,13 @@ export interface ScenarioContext<TInput extends ScenarioInput = ScenarioInput> {
   readonly interactive: (...args: any[]) => Promise<any>;
   readonly signal: AbortSignal;
   readonly log: ScenarioLogFn;
+  /**
+   * Manual-mode overrides for this invocation. Always defined; an empty object
+   * means autopilot or a manual run with no overrides set. See
+   * {@link ScenarioOverrides} for which fields the wiring layer applies
+   * automatically.
+   */
+  readonly overrides: ScenarioOverrides;
 }
 
 /** A single named scenario in a `defineSandcastle({...})` config. */

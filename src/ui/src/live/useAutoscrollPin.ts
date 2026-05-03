@@ -29,11 +29,18 @@ export const useAutoscrollPin = <T extends HTMLElement = HTMLDivElement>(
   const containerRef = useRef<T | null>(null);
   const [pinned, setPinned] = useState(true);
 
+  // Mirror `pinned` into a ref so `bumpToBottom` keeps a stable identity even
+  // as the user scrolls. Without this the callback is recreated on every
+  // pin-state change, causing every layout effect that depends on it to
+  // re-fire on each scroll event.
+  const pinnedRef = useRef(pinned);
+  pinnedRef.current = pinned;
+
   const bumpToBottom = useCallback(() => {
     const el = containerRef.current;
-    if (!el || !pinned) return;
+    if (!el || !pinnedRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [pinned]);
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;

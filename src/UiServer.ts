@@ -201,21 +201,40 @@ const handleWebSocketUpgrade = (
     return;
   }
 
+  // Subscribe-then-snapshot-then-drain: we subscribe first and buffer any
+  // events that arrive before the snapshot is sent, then replay them after.
+  // This closes the snapshot/subscribe race — even if a future change adds
+  // an await between subscribe and getSession, no event published in that
+  // window can be silently lost. In the current synchronous code path the
+  // buffer is always empty, but the pattern is the safety net.
+  let snapshotSent = false;
+  const buffered: import("./EventStore.js").SandcastleEvent[] = [];
+  const unsubscribe = broadcaster.subscribe(
+    { type: "session", id: sessionId },
+    (event) => {
+      if (!snapshotSent) {
+        buffered.push(event);
+        return;
+      }
+      conn.send(JSON.stringify({ type: "event", event }));
+    },
+  );
+
   const view = index.getSession(sessionId);
   if (!view) {
+    unsubscribe();
     conn.send(JSON.stringify({ type: "error", reason: "unknown session" }));
     conn.close(1008, "unknown session");
     return;
   }
 
   conn.send(JSON.stringify({ type: "snapshot", view }));
+  snapshotSent = true;
+  for (const event of buffered) {
+    conn.send(JSON.stringify({ type: "event", event }));
+  }
+  buffered.length = 0;
 
-  const unsubscribe = broadcaster.subscribe(
-    { type: "session", id: sessionId },
-    (event) => {
-      conn.send(JSON.stringify({ type: "event", event }));
-    },
-  );
   conn.onClose(() => {
     unsubscribe();
   });

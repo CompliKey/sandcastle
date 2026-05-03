@@ -6,7 +6,9 @@
  * the CLI wires it up with a populated index and starts/stops it.
  *
  * Surface
- * - REST: `/api/sessions`, `/api/sessions/:id`, `/api/tickets/:id/sessions`
+ * - REST: `/api/sessions`, `/api/sessions/:id`,
+ *         `/api/tickets/:id` (sessions + per-ticket rollup),
+ *         `/api/tickets/:id/sessions` (legacy — sessions only)
  * - WS:   `/ws` — accepts upgrades; no broadcast in this slice.
  *         Slice 8 fills in live event push.
  * - Static: every other GET serves files from `assetsDir` (the bundled
@@ -510,11 +512,22 @@ const handleRequest = async (
     });
   }
 
-  const ticketMatch = pathname.match(/^\/api\/tickets\/([^/]+)\/sessions$/);
+  const ticketSessionsMatch = pathname.match(
+    /^\/api\/tickets\/([^/]+)\/sessions$/,
+  );
+  if (ticketSessionsMatch) {
+    const ticketId = decodeURIComponent(ticketSessionsMatch[1]!);
+    const sessions = ctx.index.listByTicket(ticketId);
+    return sendJson(res, 200, { ticketId, sessions });
+  }
+
+  const ticketMatch = pathname.match(/^\/api\/tickets\/([^/]+)$/);
   if (ticketMatch) {
     const ticketId = decodeURIComponent(ticketMatch[1]!);
     const sessions = ctx.index.listByTicket(ticketId);
-    return sendJson(res, 200, { ticketId, sessions });
+    if (sessions.length === 0) return sendError(res, 404, "ticket not found");
+    const rollup = ctx.index.getRollups({ type: "ticket", ticketId });
+    return sendJson(res, 200, { ticketId, sessions, rollup });
   }
 
   if (pathname.startsWith("/api/")) {

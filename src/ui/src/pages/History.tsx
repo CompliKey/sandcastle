@@ -27,10 +27,10 @@ const outcomeBadge = (outcome: SessionView["outcome"]): ReactElement => {
 const statusOf = (s: SessionView): StatusFilter | "running" =>
   s.outcome ?? "running";
 
-const formatIterations = (s: SessionView): string =>
-  // We don't yet know maxIterations from the event log alone — slice 7 just
-  // shows the count run so far, in the wireframe's "5 / —" shape.
-  `${s.rollup.iterationCount} / —`;
+const formatIterations = (s: SessionView): string => {
+  const max = s.rollup.maxIterations;
+  return `${s.rollup.iterationCount} / ${max ?? "—"}`;
+};
 
 /** Pretty single-line summary of why an errored/halted session ended. */
 const errorDetail = (s: SessionView): string | null => {
@@ -204,7 +204,7 @@ export const HistoryPage = (): ReactElement => {
               const detail = errorDetail(s);
               return (
                 <Link
-                  to={`/sessions/${encodeURIComponent(s.sessionId)}`}
+                  to={`/tickets/${encodeURIComponent(s.ticketId)}`}
                   key={s.sessionId}
                   className={`session-row${errored ? " session-row--errored" : ""}`}
                   role="row"
@@ -247,14 +247,14 @@ export const HistoryPage = (): ReactElement => {
                       <Tooltip.Trigger asChild>
                         <span
                           className="btn btn--ghost"
-                          aria-label="Open session"
+                          aria-label="Open ticket"
                         >
                           ↗
                         </span>
                       </Tooltip.Trigger>
                       <Tooltip.Portal>
                         <Tooltip.Content className="tooltip">
-                          Open session detail
+                          Open ticket detail
                         </Tooltip.Content>
                       </Tooltip.Portal>
                     </Tooltip.Root>

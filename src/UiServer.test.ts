@@ -164,6 +164,201 @@ describe("UiServer — REST surface", () => {
     expect(body.sessions.map((s) => s.sessionId)).toEqual(["ses_a"]);
   });
 
+  it("returns ticket detail (sessions + per-ticket rollup) at /api/tickets/:id", async () => {
+    // Two sessions for the same ticket — first errored, second done — so the
+    // rollup math has something non-trivial to exercise (sums, average, and
+    // first-start → last-done time-to-close).
+    const events: SandcastleEvent[] = [
+      {
+        type: "session.start",
+        laneId: "main",
+        timestamp: 100,
+        sessionId: "ses_x",
+        ticketId: "VGD-200",
+        scenario: "implement",
+        startedAt: 100,
+        maxIterations: 12,
+      },
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 110,
+        sessionId: "ses_x",
+        iteration: 1,
+        startedAt: 110,
+      },
+      {
+        type: "iteration.end",
+        laneId: "main",
+        timestamp: 200,
+        sessionId: "ses_x",
+        iteration: 1,
+        endedAt: 200,
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 5000,
+        },
+      },
+      {
+        type: "session.end",
+        laneId: "main",
+        timestamp: 300,
+        sessionId: "ses_x",
+        outcome: "errored",
+        endedAt: 300,
+      },
+      {
+        type: "session.start",
+        laneId: "main",
+        timestamp: 1000,
+        sessionId: "ses_y",
+        ticketId: "VGD-200",
+        scenario: "implement",
+        startedAt: 1000,
+        maxIterations: 12,
+      },
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 1010,
+        sessionId: "ses_y",
+        iteration: 1,
+        startedAt: 1010,
+      },
+      {
+        type: "iteration.end",
+        laneId: "main",
+        timestamp: 1500,
+        sessionId: "ses_y",
+        iteration: 1,
+        endedAt: 1500,
+        usage: {
+          inputTokens: 500,
+          outputTokens: 100,
+          cacheCreationInputTokens: 100,
+          cacheReadInputTokens: 1000,
+        },
+      },
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 1510,
+        sessionId: "ses_y",
+        iteration: 2,
+        startedAt: 1510,
+      },
+      {
+        type: "iteration.end",
+        laneId: "main",
+        timestamp: 1900,
+        sessionId: "ses_y",
+        iteration: 2,
+        endedAt: 1900,
+        usage: {
+          inputTokens: 500,
+          outputTokens: 100,
+          cacheCreationInputTokens: 100,
+          cacheReadInputTokens: 1000,
+        },
+      },
+      {
+        type: "session.end",
+        laneId: "main",
+        timestamp: 2000,
+        sessionId: "ses_y",
+        outcome: "done",
+        endedAt: 2000,
+      },
+    ];
+
+    const index = buildSessionIndex(events);
+    server = await startUiServer({ index, port: 0 });
+
+    const res = await fetch(`${server.url}/api/tickets/VGD-200`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ticketId: string;
+      sessions: Array<{ sessionId: string; outcome?: string }>;
+      rollup: {
+        ticketId: string;
+        sessionCount: number;
+        totalTokens: {
+          input: number;
+          output: number;
+          cacheCreation: number;
+          cacheRead: number;
+        };
+        totalIterations: number;
+        totalWallTimeMs: number;
+        averageIterationsPerSession: number;
+        timeToCloseMs?: number;
+      };
+    };
+
+    expect(body.ticketId).toBe("VGD-200");
+    // Sessions are returned oldest-first by SessionIndex.listByTicket; the
+    // frontend reverses for display.
+    expect(body.sessions.map((s) => s.sessionId)).toEqual(["ses_x", "ses_y"]);
+    expect(body.sessions.map((s) => s.outcome)).toEqual(["errored", "done"]);
+
+    expect(body.rollup.sessionCount).toBe(2);
+    expect(body.rollup.totalTokens).toEqual({
+      input: 2000,
+      output: 400,
+      cacheCreation: 200,
+      cacheRead: 7000,
+    });
+    expect(body.rollup.totalIterations).toBe(3);
+    // ses_x: 200ms, ses_y: 1000ms.
+    expect(body.rollup.totalWallTimeMs).toBe(1200);
+    expect(body.rollup.averageIterationsPerSession).toBeCloseTo(1.5, 5);
+    // earliest start (100) to latest done end (2000).
+    expect(body.rollup.timeToCloseMs).toBe(1900);
+  });
+
+  it("404s ticket detail for an unknown ticket", async () => {
+    const index = buildSessionIndex(sampleEvents());
+    server = await startUiServer({ index, port: 0 });
+
+    const res = await fetch(`${server.url}/api/tickets/VGD-999`);
+    expect(res.status).toBe(404);
+  });
+
+  it("omits timeToCloseMs when no session has finished done", async () => {
+    // Single errored session — the rollup should still come back, but with
+    // timeToCloseMs undefined (the ticket has not closed yet).
+    const events: SandcastleEvent[] = [
+      {
+        type: "session.start",
+        laneId: "main",
+        timestamp: 100,
+        sessionId: "ses_z",
+        ticketId: "VGD-300",
+        scenario: "implement",
+        startedAt: 100,
+      },
+      {
+        type: "session.end",
+        laneId: "main",
+        timestamp: 200,
+        sessionId: "ses_z",
+        outcome: "errored",
+        endedAt: 200,
+      },
+    ];
+    const index = buildSessionIndex(events);
+    server = await startUiServer({ index, port: 0 });
+
+    const res = await fetch(`${server.url}/api/tickets/VGD-300`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rollup: { timeToCloseMs?: number };
+    };
+    expect(body.rollup.timeToCloseMs).toBeUndefined();
+  });
+
   it("404s on unknown api endpoints", async () => {
     const index = buildSessionIndex([]);
     server = await startUiServer({ index, port: 0 });

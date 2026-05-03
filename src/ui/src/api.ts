@@ -89,6 +89,26 @@ export const fetchTicketSessions = async (
   return body.sessions;
 };
 
+export interface TicketRollup {
+  ticketId: string;
+  sessionCount: number;
+  totalTokens: TokenTotals;
+  totalIterations: number;
+  totalWallTimeMs: number;
+  averageIterationsPerSession: number;
+  /** Earliest start to latest done end. Undefined until at least one done session. */
+  timeToCloseMs?: number;
+}
+
+export interface TicketDetail {
+  ticketId: string;
+  sessions: SessionView[];
+  rollup: TicketRollup;
+}
+
+export const fetchTicket = async (ticketId: string): Promise<TicketDetail> =>
+  json<TicketDetail>(`/api/tickets/${encodeURIComponent(ticketId)}`);
+
 // ---------------------------------------------------------------------------
 // Queue + manual run-scenario (VGD-143)
 // ---------------------------------------------------------------------------

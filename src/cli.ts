@@ -8,6 +8,8 @@ import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 
 import { createEventStore } from "./EventStore.js";
+import { createFailureCoordinator } from "./FailureCoordinator.js";
+import { runOrchestrationLoop } from "./OrchestrationLoop.js";
 import { runScenario } from "./ScenarioRunner.js";
 import { Display } from "./Display.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
@@ -720,6 +722,148 @@ const runScenarioCommand = Command.make(
     }),
 );
 
+// --- autopilot command ---
+
+/**
+ * Autopilot drain loop: pulls pending tickets and dispatches the named scenario
+ * for each one, in a child process. On ticket-level failures it labels the
+ * ticket `agent-error` (via the user's backlog manager) and continues; on
+ * infra-level failures or circuit-breaker trips it halts. On empty queue it
+ * idles instead of exiting, so the (future) UI sees a live process during gaps.
+ *
+ * `--scenario` is optional when the config defines exactly one scenario;
+ * otherwise it is required.
+ */
+
+const autopilotConfigOption = Options.file("config").pipe(
+  Options.withDescription(
+    `Path to the sandcastle config (default: ${DEFAULT_CONFIG_PATH})`,
+  ),
+  Options.optional,
+);
+
+const autopilotScenarioOption = Options.text("scenario").pipe(
+  Options.withDescription(
+    "Scenario to invoke for each ticket. Optional when the config defines exactly one scenario.",
+  ),
+  Options.optional,
+);
+
+const autopilotIdlePollOption = Options.integer("idle-poll-ms").pipe(
+  Options.withDescription(
+    "Poll interval (ms) when the queue is empty (default: 5000).",
+  ),
+  Options.optional,
+);
+
+const autopilotCommand = Command.make(
+  "autopilot",
+  {
+    config: autopilotConfigOption,
+    scenario: autopilotScenarioOption,
+    idlePoll: autopilotIdlePollOption,
+  },
+  ({ config, scenario, idlePoll }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const configPath =
+        config._tag === "Some" ? config.value : join(cwd, DEFAULT_CONFIG_PATH);
+
+      yield* requireConfigDir(cwd);
+
+      const loaded = yield* loadSandcastleConfig(configPath);
+      const scenarioNames = loaded.metadata.scenarios.map((s) => s.name);
+
+      let scenarioName: string;
+      if (scenario._tag === "Some") {
+        if (!scenarioNames.includes(scenario.value)) {
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown scenario "${scenario.value}". Available: ${scenarioNames.join(", ") || "(none)"}.`,
+            }),
+          );
+        }
+        scenarioName = scenario.value;
+      } else if (scenarioNames.length === 1) {
+        scenarioName = scenarioNames[0]!;
+      } else {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              scenarioNames.length === 0
+                ? "Config defines no scenarios. Add one to `defineSandcastle({ scenarios })`."
+                : `Config defines multiple scenarios — pass --scenario=<name>. Available: ${scenarioNames.join(", ")}.`,
+          }),
+        );
+        return; // unreachable; satisfies the type narrowing for `scenarioName`
+      }
+
+      yield* d.text(
+        `${styleText("bold", "Autopilot:")} scenario=${styleText("cyan", scenarioName)}  config=${styleText("dim", configPath)}`,
+      );
+
+      const eventsDir = resolvePath(cwd, ".sandcastle", "state");
+      const store = createEventStore({ dir: eventsDir });
+
+      const ac = new AbortController();
+      const onSignal = (): void => ac.abort();
+      process.once("SIGTERM", onSignal);
+      process.once("SIGINT", onSignal);
+
+      const coordinator = createFailureCoordinator({
+        backlogManager: loaded.backlogManager,
+      });
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runOrchestrationLoop({
+            scenario: scenarioName,
+            backlogManager: loaded.backlogManager,
+            failureCoordinator: coordinator,
+            signal: ac.signal,
+            idlePollIntervalMs:
+              idlePoll._tag === "Some" ? idlePoll.value : undefined,
+            runScenario: (args) =>
+              runScenario({
+                scenario: args.scenario,
+                ticketId: args.ticketId,
+                configPath: resolvePath(configPath),
+                store,
+                signal: ac.signal,
+              }),
+          }),
+        catch: (err) =>
+          new InitError({
+            message: `Autopilot loop crashed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          }),
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            process.removeListener("SIGTERM", onSignal);
+            process.removeListener("SIGINT", onSignal);
+          }),
+        ),
+        Effect.tap(() => Effect.promise(() => store.close())),
+      );
+
+      const summary = `attempted=${result.ticketsAttempted}  done=${result.ticketsCompleted}  errored=${result.ticketsErrored}`;
+      if (result.status === "halted") {
+        yield* d.status(
+          `Autopilot halted: ${result.reason}. ${summary}`,
+          "error",
+        );
+      } else {
+        yield* d.status(
+          `Autopilot stopped: ${result.reason}. ${summary}`,
+          "warn",
+        );
+      }
+    }),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -738,6 +882,7 @@ export const sandcastle = rootCommand.pipe(
     scenariosCommand,
     queueCommand,
     runScenarioCommand,
+    autopilotCommand,
   ]),
 );
 

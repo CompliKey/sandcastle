@@ -105,6 +105,19 @@ export type {
   HandleFailureInput,
   HandleFailureResult,
 } from "./FailureCoordinator.js";
+export {
+  DEFAULT_IDLE_POLL_INTERVAL_MS,
+  runOrchestrationLoop,
+} from "./OrchestrationLoop.js";
+export type {
+  OrchestrationLoopOptions,
+  OrchestrationLoopResult,
+  OrchestrationLoopStatus,
+  OrchestrationLogger,
+  RunScenarioArgs,
+  RunScenarioFn,
+  SleepFn,
+} from "./OrchestrationLoop.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
 export { CwdError } from "./resolveCwd.js";

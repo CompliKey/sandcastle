@@ -316,6 +316,81 @@ describe("ScenarioRunner", () => {
       });
     }
   });
+
+  it("forwards overrides to the child via env (JSON-encoded)", async () => {
+    const { fork, lastEnv } = makeFakeFork((child) => {
+      child.emit("exit", 0, null);
+    });
+
+    await runScenario({
+      scenario: "ship-ticket",
+      ticketId: "VGD-200",
+      configPath: "/tmp/main.ts",
+      store,
+      sessionId: "ses-overrides",
+      clock: tickClock(),
+      childModulePath: "/dev/null",
+      fork,
+      overrides: {
+        maxIterations: 5,
+        model: "claude-sonnet-4-6",
+        promptArgs: { focusFiles: ["a.ts"] },
+      },
+    });
+
+    const env = lastEnv();
+    expect(env?.[SCENARIO_ENV.overrides]).toBeDefined();
+    const parsed = JSON.parse(env![SCENARIO_ENV.overrides]!);
+    expect(parsed).toEqual({
+      maxIterations: 5,
+      model: "claude-sonnet-4-6",
+      promptArgs: { focusFiles: ["a.ts"] },
+    });
+  });
+
+  it("does not set the overrides env when overrides is omitted", async () => {
+    const { fork, lastEnv } = makeFakeFork((child) => {
+      child.emit("exit", 0, null);
+    });
+
+    await runScenario({
+      scenario: "ship-ticket",
+      ticketId: "VGD-200",
+      configPath: "/tmp/main.ts",
+      store,
+      sessionId: "ses-no-overrides",
+      clock: tickClock(),
+      childModulePath: "/dev/null",
+      fork,
+    });
+
+    const env = lastEnv();
+    expect(env?.[SCENARIO_ENV.overrides]).toBeUndefined();
+  });
+
+  it("override maxIterations wins over the display default in session.start", async () => {
+    const { fork } = makeFakeFork((child) => {
+      child.emit("exit", 0, null);
+    });
+
+    await runScenario({
+      scenario: "ship-ticket",
+      ticketId: "VGD-200",
+      configPath: "/tmp/main.ts",
+      store,
+      sessionId: "ses-display",
+      clock: tickClock(),
+      childModulePath: "/dev/null",
+      fork,
+      maxIterations: 12,
+      overrides: { maxIterations: 3 },
+    });
+
+    const events = await collectEvents(store);
+    const start = events[0]!;
+    if (start.type !== "session.start") throw new Error("missing start");
+    expect(start.maxIterations).toBe(3);
+  });
 });
 
 // ---------------------------------------------------------------------------

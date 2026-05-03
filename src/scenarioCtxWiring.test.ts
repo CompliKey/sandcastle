@@ -3,10 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import {
   createIterationBoundaryTracker,
+  readScenarioOverrides,
   wireRun,
   type IpcSender,
 } from "./scenarioCtxWiring.js";
-import type { ScenarioChildMessage } from "./scenarioIpcProtocol.js";
+import {
+  SCENARIO_ENV,
+  type ScenarioChildMessage,
+} from "./scenarioIpcProtocol.js";
 
 const makeSender = (): {
   send: IpcSender;
@@ -33,6 +37,30 @@ const toolEvent = (
   formattedArgs,
   iteration: iter,
   timestamp: new Date(),
+});
+
+describe("readScenarioOverrides", () => {
+  it("returns {} when env var is unset", () => {
+    expect(readScenarioOverrides({})).toEqual({});
+  });
+
+  it("parses a valid JSON-encoded overrides payload", () => {
+    const env = {
+      [SCENARIO_ENV.overrides]: JSON.stringify({
+        maxIterations: 4,
+        promptArgs: { K: "v" },
+      }),
+    };
+    expect(readScenarioOverrides(env)).toEqual({
+      maxIterations: 4,
+      promptArgs: { K: "v" },
+    });
+  });
+
+  it("treats malformed JSON as no-overrides — never crashes the run", () => {
+    const env = { [SCENARIO_ENV.overrides]: "not-json" };
+    expect(readScenarioOverrides(env)).toEqual({});
+  });
 });
 
 describe("createIterationBoundaryTracker", () => {
@@ -173,6 +201,95 @@ describe("wireRun", () => {
 
     expect(userCb).toHaveBeenCalledTimes(1);
     expect(ipc.find((m) => m.kind === "agent.text")).toBeDefined();
+  });
+
+  it("applies maxIterations override, replacing the scenario value", async () => {
+    const impl = vi.fn(async () => ({
+      iterations: [],
+      commits: [],
+      stdout: "",
+    })) as never;
+
+    const wired = wireRun({
+      _runImpl: impl,
+      active: () => true,
+      send: () => {},
+      overrides: { maxIterations: 5 },
+    });
+
+    await wired({
+      agent: {} as never,
+      sandbox: {} as never,
+      prompt: "x",
+      maxIterations: 12,
+    });
+
+    const call = (impl as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![0] as { maxIterations?: number };
+    expect(call.maxIterations).toBe(5);
+  });
+
+  it("merges promptArgs override with manual values winning on conflict", async () => {
+    const impl = vi.fn(async () => ({
+      iterations: [],
+      commits: [],
+      stdout: "",
+    })) as never;
+
+    const wired = wireRun({
+      _runImpl: impl,
+      active: () => true,
+      send: () => {},
+      overrides: {
+        promptArgs: { TICKET_ID: "OVERRIDE-1", EXTRA: "added" },
+      },
+    });
+
+    await wired({
+      agent: {} as never,
+      sandbox: {} as never,
+      prompt: "x",
+      promptArgs: { TICKET_ID: "SCENARIO-1", KEEP: "kept" },
+    });
+
+    const call = (impl as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![0] as { promptArgs?: Record<string, unknown> };
+    expect(call.promptArgs).toEqual({
+      TICKET_ID: "OVERRIDE-1",
+      KEEP: "kept",
+      EXTRA: "added",
+    });
+  });
+
+  it("leaves options untouched when overrides is empty", async () => {
+    const impl = vi.fn(async () => ({
+      iterations: [],
+      commits: [],
+      stdout: "",
+    })) as never;
+
+    const wired = wireRun({
+      _runImpl: impl,
+      active: () => true,
+      send: () => {},
+      overrides: {},
+    });
+
+    await wired({
+      agent: {} as never,
+      sandbox: {} as never,
+      prompt: "x",
+      maxIterations: 12,
+      promptArgs: { TICKET_ID: "SCENARIO-1" },
+    });
+
+    const call = (impl as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]![0] as {
+      maxIterations?: number;
+      promptArgs?: Record<string, unknown>;
+    };
+    expect(call.maxIterations).toBe(12);
+    expect(call.promptArgs).toEqual({ TICKET_ID: "SCENARIO-1" });
   });
 
   it("flushes the open iteration even if the underlying run rejects", async () => {

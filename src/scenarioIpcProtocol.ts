@@ -41,6 +41,12 @@ export const SCENARIO_ENV = {
    * decide whether to route logging through IPC.
    */
   ipcMode: "SANDCASTLE_IPC_MODE",
+  /**
+   * JSON-encoded {@link ScenarioOverrides} for manual-mode runs. Absent or
+   * empty for autopilot. Read by `scenarioCtxWiring` and surfaced via
+   * `ctx.overrides`.
+   */
+  overrides: "SANDCASTLE_OVERRIDES",
 } as const;
 
 // ---------------------------------------------------------------------------

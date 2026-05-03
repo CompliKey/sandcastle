@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, type ReactElement } from "react";
+import { useLayoutEffect, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 
 import type { SessionView } from "../api.js";
@@ -46,11 +46,6 @@ export const LiveSessionView = ({
   useLayoutEffect(() => {
     bumpToBottom();
   }, [iterationCount, lastToolCallTs, bumpToBottom]);
-
-  // After connect, if pinned, jump to the bottom of any pre-existing content.
-  useEffect(() => {
-    if (view) bumpToBottom();
-  }, [view?.sessionId, bumpToBottom, view]);
 
   if (live.error && !view) {
     return (

@@ -54,8 +54,17 @@ export const MetricsHeader = ({
     <div className="metrics-row" role="group" aria-label="Session metrics">
       <div className="metric">
         <span className="metric__label">Iteration</span>
-        <span className="metric__value">{view.iterations.length}</span>
-        <span className="metric__sub">elapsed</span>
+        <span className="metric__value">
+          {view.rollup.maxIterations !== undefined
+            ? `${view.iterations.length} / ${view.rollup.maxIterations}`
+            : view.iterations.length}
+        </span>
+        <span className="metric__sub">
+          {view.rollup.maxIterations !== undefined &&
+          view.rollup.maxIterations > 0
+            ? `${Math.round((view.iterations.length / view.rollup.maxIterations) * 100)}% of cap`
+            : "elapsed"}
+        </span>
       </div>
       <div className="metric">
         <span className="metric__label">Wall time</span>

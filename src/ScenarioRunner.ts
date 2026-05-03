@@ -77,6 +77,11 @@ export interface ScenarioRunnerOptions {
    * child process without spawning a real one.
    */
   readonly fork?: typeof fork;
+  /**
+   * Optional iteration cap for this session, propagated into the
+   * `session.start` event so the UI can show `iteration / max`.
+   */
+  readonly maxIterations?: number;
 }
 
 export interface ScenarioRunResult {
@@ -114,6 +119,7 @@ export const runScenario = async (
       ticketId: options.ticketId,
       scenario: options.scenario,
       startedAt: clock(),
+      maxIterations: options.maxIterations,
     }),
   );
 

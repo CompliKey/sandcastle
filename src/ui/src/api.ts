@@ -19,6 +19,7 @@ export interface SessionRollup {
   totalTokens: TokenTotals;
   iterationCount: number;
   wallTimeMs?: number;
+  maxIterations?: number;
 }
 
 export type SessionOutcome = "done" | "errored" | "halted";
@@ -111,6 +112,7 @@ export type SandcastleEvent =
       ticketId: string;
       scenario: string;
       startedAt: number;
+      maxIterations?: number;
     })
   | (EventBase & {
       type: "session.end";

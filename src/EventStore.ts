@@ -54,6 +54,12 @@ export interface SessionStartEvent extends EventBase {
   readonly ticketId: string;
   readonly scenario: string;
   readonly startedAt: number;
+  /**
+   * Iteration cap for this session, when known. Surfaces in the UI as
+   * `iterationCount / maxIterations`. Optional for backward compatibility
+   * with pre-VGD-141 events on disk and producers that don't expose a cap.
+   */
+  readonly maxIterations?: number;
 }
 
 export interface SessionEndEvent extends EventBase {

@@ -88,6 +88,12 @@ export interface SessionRollup {
   readonly iterationCount: number;
   /** `endedAt - startedAt` once the session has ended. */
   readonly wallTimeMs?: number;
+  /**
+   * Iteration cap propagated from `session.start`. Undefined when the
+   * producer didn't expose one — the UI then falls back to showing just
+   * the iteration count without "of N".
+   */
+  readonly maxIterations?: number;
 }
 
 export interface TicketRollup {
@@ -156,6 +162,7 @@ interface SessionState {
   startedAt: number;
   endedAt?: number;
   outcome?: SessionOutcome;
+  maxIterations?: number;
   iterations: Map<number, IterationState>;
   iterationOrder: number[];
   commits: SessionView["commits"][number][];
@@ -210,6 +217,7 @@ const buildSessionView = (s: SessionState): SessionView => {
     totalTokens,
     iterationCount: iterations.length,
     wallTimeMs,
+    maxIterations: s.maxIterations,
   };
   return {
     sessionId: s.sessionId,
@@ -262,6 +270,7 @@ export const createSessionIndex = (): SessionIndex => {
           scenario: event.scenario,
           laneId: event.laneId,
           startedAt: event.startedAt,
+          maxIterations: event.maxIterations,
           iterations: new Map(),
           iterationOrder: [],
           commits: [],

@@ -228,6 +228,7 @@ export interface SessionStartParams {
   readonly ticketId: string;
   readonly scenario: string;
   readonly startedAt: number;
+  readonly maxIterations?: number;
 }
 
 export const buildSessionStartEvent = (
@@ -240,6 +241,7 @@ export const buildSessionStartEvent = (
   scenario: p.scenario,
   startedAt: p.startedAt,
   timestamp: p.startedAt,
+  ...(p.maxIterations !== undefined ? { maxIterations: p.maxIterations } : {}),
 });
 
 export interface SessionEndParams {

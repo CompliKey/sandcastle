@@ -705,6 +705,7 @@ const runScenarioCommand = Command.make(
             configPath: resolvePath(configPath),
             store,
             signal: ac.signal,
+            maxIterations: scenarioMeta?.maxIterations,
           }),
         catch: (err) =>
           new InitError({
@@ -844,6 +845,9 @@ const autopilotCommand = Command.make(
                 configPath: resolvePath(configPath),
                 store,
                 signal: ac.signal,
+                maxIterations: loaded.metadata.scenarios.find(
+                  (s) => s.name === args.scenario,
+                )?.maxIterations,
               }),
           }),
         catch: (err) =>

@@ -86,6 +86,25 @@ export type {
 } from "./EventStore.js";
 export { createJiraBacklogManager } from "./JiraBacklogManager.js";
 export type { JiraBacklogManagerConfig } from "./JiraBacklogManager.js";
+export {
+  classifyFailure,
+  DEFAULT_CONSECUTIVE_FAILURE_THRESHOLD,
+} from "./FailurePolicy.js";
+export type {
+  FailureAction,
+  FailureCategory,
+  FailureClassification,
+  FailureInput,
+  FailureKind,
+  PolicyConfig,
+} from "./FailurePolicy.js";
+export { createFailureCoordinator } from "./FailureCoordinator.js";
+export type {
+  FailureCoordinator,
+  FailureCoordinatorOptions,
+  HandleFailureInput,
+  HandleFailureResult,
+} from "./FailureCoordinator.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
 export { CwdError } from "./resolveCwd.js";

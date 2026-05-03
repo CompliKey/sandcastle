@@ -27,21 +27,30 @@ const buildWsUrl = (sessionId: string): string => {
 
 export const useLiveSession = (
   sessionId: string | undefined,
+  initialView?: SessionView,
 ): UseLiveSessionResult => {
-  const [view, setView] = useState<SessionView | null>(null);
+  const [view, setView] = useState<SessionView | null>(initialView ?? null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
 
   // Hold a ref to the latest view so the message handler closure can read it
   // without re-binding on every state change.
-  const viewRef = useRef<SessionView | null>(null);
+  const viewRef = useRef<SessionView | null>(initialView ?? null);
   viewRef.current = view;
+
+  // Capture the initialView for the effect without taking a dep on it: the
+  // caller may pass a fresh object each render, but we only want to seed
+  // once per sessionId.
+  const initialViewRef = useRef(initialView);
+  initialViewRef.current = initialView;
 
   useEffect(() => {
     if (!sessionId) return;
-    setView(null);
+    setView(initialViewRef.current ?? null);
+    viewRef.current = initialViewRef.current ?? null;
     setError(null);
     setConnected(false);
+    let snapshotReceived = false;
 
     const ws = new WebSocket(buildWsUrl(sessionId));
 
@@ -64,6 +73,7 @@ export const useLiveSession = (
       }
       switch (msg.type) {
         case "snapshot": {
+          snapshotReceived = true;
           let next = msg.view;
           if (preSnapshot.length > 0) {
             // eslint-disable-next-line no-console
@@ -82,6 +92,14 @@ export const useLiveSession = (
           return;
         }
         case "event": {
+          // Until the WS snapshot arrives, buffer rather than apply on top
+          // of an initialView (REST-snapshot) — the WS snapshot is the
+          // authoritative starting point and may already include any event
+          // that landed in the gap.
+          if (!snapshotReceived) {
+            preSnapshot.push(msg);
+            return;
+          }
           const current = viewRef.current;
           if (!current) {
             preSnapshot.push(msg);

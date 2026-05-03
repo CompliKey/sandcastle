@@ -12,6 +12,12 @@ interface LiveSessionViewProps {
   readonly sessionId: string;
   /** When `historical` is supplied, render that view and skip the WS feed. */
   readonly historical?: SessionView;
+  /**
+   * Optional REST-fetched starting view for live sessions. Lets the UI render
+   * immediately while the WS handshake completes instead of showing a
+   * "Connecting…" spinner during a second round-trip.
+   */
+  readonly initialView?: SessionView;
 }
 
 const isErrored = (view: SessionView, iterationNum: number): boolean =>
@@ -23,8 +29,9 @@ const isErrored = (view: SessionView, iterationNum: number): boolean =>
 export const LiveSessionView = ({
   sessionId,
   historical,
+  initialView,
 }: LiveSessionViewProps): ReactElement => {
-  const live = useLiveSession(historical ? undefined : sessionId);
+  const live = useLiveSession(historical ? undefined : sessionId, initialView);
   const view = historical ?? live.view;
   const isLive = !historical;
   const { pinned, containerRef, bumpToBottom } =

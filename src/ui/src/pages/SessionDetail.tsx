@@ -61,11 +61,14 @@ export const SessionDetailPage = (): ReactElement => {
   }
 
   // If the session has finished, render once from the REST snapshot.
-  // Otherwise let LiveSessionView open a WS and stream updates.
+  // Otherwise hand it to LiveSessionView as the initial view so the page
+  // shows immediately while the WS opens — and let it stream updates.
+  const finished = snapshot.outcome !== undefined;
   return (
     <LiveSessionView
       sessionId={id}
-      historical={snapshot.outcome !== undefined ? snapshot : undefined}
+      historical={finished ? snapshot : undefined}
+      initialView={finished ? undefined : snapshot}
     />
   );
 };

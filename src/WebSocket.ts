@@ -295,7 +295,11 @@ export const attachWebSocket = (
   });
 
   socket.on("error", () => {
+    // socket.end() in finishClose is a graceful half-close; on a hard reset
+    // the "close" event may never fire and the FD would leak. Hard-destroy
+    // after the close frame attempt, mirroring the handshake-rejection path.
     finishClose(1011, "internal error");
+    socket.destroy();
   });
 
   return {

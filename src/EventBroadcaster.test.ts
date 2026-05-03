@@ -92,6 +92,32 @@ describe("EventBroadcaster", () => {
     expect(received).toHaveLength(1);
   });
 
+  it("a stale unsubscribe does not evict a freshly re-subscribed sink", () => {
+    // Regression: previously addToBucket closed over the original bucket Set,
+    // so calling the first subscriber's unsubscribe after a re-subscribe could
+    // mutate the new bucket.
+    const bus = createEventBroadcaster();
+    const firstReceived: SandcastleEvent[] = [];
+    const secondReceived: SandcastleEvent[] = [];
+
+    const unsubFirst = bus.subscribe({ type: "session", id: "sess_1" }, (e) => {
+      firstReceived.push(e);
+    });
+    unsubFirst(); // bucket is now deleted (size === 0)
+
+    bus.subscribe({ type: "session", id: "sess_1" }, (e) => {
+      secondReceived.push(e);
+    });
+
+    // Stale unsubscribe — must be a no-op for the new bucket.
+    unsubFirst();
+
+    bus.publish(sampleEvent({ text: "after-restub" }));
+
+    expect(firstReceived).toHaveLength(0);
+    expect(secondReceived).toHaveLength(1);
+  });
+
   it("survives a subscriber that throws — other subscribers still receive", () => {
     const bus = createEventBroadcaster();
     const received: SandcastleEvent[] = [];

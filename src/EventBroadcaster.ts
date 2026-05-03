@@ -68,9 +68,15 @@ export const createEventBroadcaster = (
       map.set(key, bucket);
     }
     bucket.add(sink);
+    // Look up the bucket by key at unsubscribe time rather than closing over
+    // it: if the original bucket was deleted (last subscriber left) and a
+    // new subscriber re-created it, a stale unsubscribe must not delete the
+    // new one out from under them.
     return () => {
-      bucket.delete(sink);
-      if (bucket.size === 0) map.delete(key);
+      const current = map.get(key);
+      if (!current) return;
+      current.delete(sink);
+      if (current.size === 0) map.delete(key);
     };
   };
 

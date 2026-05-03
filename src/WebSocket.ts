@@ -133,6 +133,14 @@ export const parseClientFrame = (buffer: Buffer): ParsedFrame | null => {
     payloadLen = lo;
     offset += 8;
   }
+  // RFC 6455 §5.5 — control frames (opcode >= 0x8) MUST have payload <= 125
+  // bytes. The big oversize guard above only catches 64 MiB+ frames; reject
+  // anything that contradicts §5.5 explicitly.
+  if (opcode >= 0x8 && payloadLen > 125) {
+    throw new Error(
+      `WebSocket control frame payload too large: ${payloadLen} bytes (max 125, RFC 6455 §5.5)`,
+    );
+  }
   if (buffer.length < offset + 4) return null;
   const mask = buffer.subarray(offset, offset + 4);
   offset += 4;

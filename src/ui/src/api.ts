@@ -162,6 +162,107 @@ export const runScenarioRequest = async (
 };
 
 // ---------------------------------------------------------------------------
+// Autopilot control + retry (VGD-144)
+// ---------------------------------------------------------------------------
+
+export type AutopilotStatus = "off" | "on" | "halted";
+
+export interface AutopilotState {
+  status: AutopilotStatus;
+  scenario?: string;
+  startedAt?: number;
+  haltedAt?: number;
+  haltReason?: string;
+  haltKind?: "infra-level" | "ticket-level";
+  ticketsAttempted: number;
+  ticketsCompleted: number;
+  ticketsErrored: number;
+}
+
+const postAction = async (
+  path: string,
+  body: unknown,
+): Promise<{ state: AutopilotState }> => {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody.error) detail = errBody.error;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(`${path} → ${detail}`);
+  }
+  return (await res.json()) as { state: AutopilotState };
+};
+
+export const fetchAutopilotState = async (): Promise<AutopilotState> => {
+  const body = await json<{ state: AutopilotState }>("/api/autopilot");
+  return body.state;
+};
+
+export const startAutopilot = async (
+  scenario?: string,
+): Promise<AutopilotState> => {
+  const body = await postAction(
+    "/api/autopilot/start",
+    scenario !== undefined ? { scenario } : {},
+  );
+  return body.state;
+};
+
+export const stopAutopilot = async (): Promise<AutopilotState> => {
+  const body = await postAction("/api/autopilot/stop", {});
+  return body.state;
+};
+
+export const resumeAutopilot = async (): Promise<AutopilotState> => {
+  const body = await postAction("/api/autopilot/resume", {});
+  return body.state;
+};
+
+export interface RetryTicketBody {
+  scenario?: string;
+  overrides?: ScenarioOverrides;
+}
+
+export const retryTicket = async (
+  ticketId: string,
+  body: RetryTicketBody = {},
+): Promise<{ sessionId: string }> => {
+  const res = await fetch(
+    `/api/tickets/${encodeURIComponent(ticketId)}/retry`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody.error) detail = errBody.error;
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(`retry failed: ${detail}`);
+  }
+  return (await res.json()) as { sessionId: string };
+};
+
+// ---------------------------------------------------------------------------
 // Commits + diff (VGD-142)
 // ---------------------------------------------------------------------------
 

@@ -36,6 +36,7 @@ import {
   sep,
 } from "node:path";
 
+import type { AutopilotController } from "./AutopilotController.js";
 import type {
   BacklogManagerHostInterface,
   BacklogTicket,
@@ -140,6 +141,13 @@ export interface UiServerOptions {
    */
   readonly scenarios?: readonly ScenarioOption[];
   /**
+   * Optional autopilot controller. When provided, the server exposes
+   * `GET /api/autopilot` and the `start`/`stop`/`resume` actions, and
+   * `POST /api/tickets/:id/retry` becomes wired up (it also requires
+   * `backlogManager` and `runScenario`).
+   */
+  readonly autopilot?: AutopilotController;
+  /**
    * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
    * directory is missing, the server returns a small placeholder page —
    * useful in tests and during early development before the frontend is
@@ -195,6 +203,7 @@ export const startUiServer = async (
       backlogManager: opts.backlogManager,
       runScenario: opts.runScenario,
       scenarios: opts.scenarios,
+      autopilot: opts.autopilot,
       health: {
         application,
         version: opts.version,
@@ -397,6 +406,7 @@ interface HandlerCtx {
   readonly backlogManager?: BacklogManagerHostInterface;
   readonly runScenario?: RunScenarioRequestFn;
   readonly scenarios?: readonly ScenarioOption[];
+  readonly autopilot?: AutopilotController;
   readonly health: HealthPayload;
 }
 
@@ -413,11 +423,29 @@ const handleRequest = async (
   const url = new URL(req.url, "http://localhost");
   const { pathname } = url;
 
-  // POST is restricted to the manual-invocation endpoint. Everything else is
-  // read-only.
+  // POST is restricted to the manual-invocation + autopilot-control + retry
+  // endpoints. Everything else is read-only.
   if (method === "POST") {
     if (pathname === "/api/run-scenario") {
       return handleRunScenario(req, res, ctx);
+    }
+    if (pathname === "/api/autopilot/start") {
+      return handleAutopilotStart(req, res, ctx);
+    }
+    if (pathname === "/api/autopilot/stop") {
+      return handleAutopilotAction(res, ctx, "stop");
+    }
+    if (pathname === "/api/autopilot/resume") {
+      return handleAutopilotAction(res, ctx, "resume");
+    }
+    const retryMatch = pathname.match(/^\/api\/tickets\/([^/]+)\/retry$/);
+    if (retryMatch) {
+      return handleTicketRetry(
+        req,
+        res,
+        ctx,
+        decodeURIComponent(retryMatch[1]!),
+      );
     }
     return sendError(res, 405, "method not allowed");
   }
@@ -435,6 +463,13 @@ const handleRequest = async (
 
   if (pathname === "/api/scenarios") {
     return sendJson(res, 200, { scenarios: ctx.scenarios ?? [] });
+  }
+
+  if (pathname === "/api/autopilot") {
+    if (!ctx.autopilot) {
+      return sendError(res, 503, "autopilot controller not configured");
+    }
+    return sendJson(res, 200, { state: ctx.autopilot.state() });
   }
 
   if (pathname === "/api/sessions") {
@@ -667,6 +702,171 @@ const handleRunScenario = async (
   // does not become an unhandled promise rejection.
   void started.done.catch(() => {});
 
+  return sendJson(res, 202, { sessionId: started.sessionId });
+};
+
+// ---------------------------------------------------------------------------
+// Autopilot control + retry handlers
+// ---------------------------------------------------------------------------
+
+const AUTOPILOT_MAX_BODY_BYTES = 16 * 1024;
+
+const resolveScenarioName = (
+  requested: string | undefined,
+  scenarios: readonly ScenarioOption[] | undefined,
+): { ok: true; scenario: string } | { ok: false; error: string } => {
+  if (typeof requested === "string" && requested.length > 0) {
+    if (scenarios && !scenarios.some((s) => s.name === requested)) {
+      const available = scenarios.map((s) => s.name).join(", ");
+      return {
+        ok: false,
+        error: `unknown scenario "${requested}". Available: ${available || "(none)"}.`,
+      };
+    }
+    return { ok: true, scenario: requested };
+  }
+  // No explicit scenario — fall back to the catalogue when there's exactly
+  // one scenario defined. Mirrors the autopilot CLI's behaviour.
+  if (scenarios && scenarios.length === 1) {
+    return { ok: true, scenario: scenarios[0]!.name };
+  }
+  if (!scenarios || scenarios.length === 0) {
+    return {
+      ok: false,
+      error: "no scenarios are configured — pass `scenario` explicitly",
+    };
+  }
+  return {
+    ok: false,
+    error: `multiple scenarios available — pass \`scenario\` explicitly. Available: ${scenarios.map((s) => s.name).join(", ")}.`,
+  };
+};
+
+const readJsonBody = async (
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<unknown | { __error: string; status: number }> => {
+  let raw: string;
+  try {
+    raw = await readRequestBody(req, maxBytes);
+  } catch (err) {
+    return {
+      __error: err instanceof Error ? err.message : String(err),
+      status: 413,
+    };
+  }
+  if (raw.length === 0) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { __error: "request body must be valid JSON", status: 400 };
+  }
+};
+
+const isParseError = (v: unknown): v is { __error: string; status: number } =>
+  typeof v === "object" &&
+  v !== null &&
+  typeof (v as { __error?: unknown }).__error === "string";
+
+const handleAutopilotStart = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: HandlerCtx,
+): Promise<void> => {
+  if (!ctx.autopilot) {
+    return sendError(res, 503, "autopilot controller not configured");
+  }
+  const body = await readJsonBody(req, AUTOPILOT_MAX_BODY_BYTES);
+  if (isParseError(body)) return sendError(res, body.status, body.__error);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return sendError(res, 400, "body must be a JSON object");
+  }
+  const requested = (body as { scenario?: unknown }).scenario;
+  const scenarioOrErr = resolveScenarioName(
+    typeof requested === "string" ? requested : undefined,
+    ctx.scenarios,
+  );
+  if (!scenarioOrErr.ok) return sendError(res, 400, scenarioOrErr.error);
+
+  const result = ctx.autopilot.start({ scenario: scenarioOrErr.scenario });
+  if (!result.ok) return sendError(res, result.status, result.error);
+  return sendJson(res, 202, { state: result.state });
+};
+
+const handleAutopilotAction = (
+  res: ServerResponse,
+  ctx: HandlerCtx,
+  action: "stop" | "resume",
+): Promise<void> => {
+  if (!ctx.autopilot) {
+    return Promise.resolve(
+      sendError(res, 503, "autopilot controller not configured"),
+    );
+  }
+  const result =
+    action === "stop" ? ctx.autopilot.stop() : ctx.autopilot.resume();
+  if (!result.ok) {
+    return Promise.resolve(sendError(res, result.status, result.error));
+  }
+  return Promise.resolve(sendJson(res, 200, { state: result.state }));
+};
+
+const handleTicketRetry = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: HandlerCtx,
+  ticketId: string,
+): Promise<void> => {
+  if (!ctx.backlogManager) {
+    return sendError(res, 503, "backlog manager not configured");
+  }
+  if (!ctx.runScenario) {
+    return sendError(res, 503, "manual run-scenario not configured");
+  }
+  const body = await readJsonBody(req, AUTOPILOT_MAX_BODY_BYTES);
+  if (isParseError(body)) return sendError(res, body.status, body.__error);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return sendError(res, 400, "body must be a JSON object");
+  }
+  const b = body as { scenario?: unknown; overrides?: unknown };
+  const scenarioOrErr = resolveScenarioName(
+    typeof b.scenario === "string" ? b.scenario : undefined,
+    ctx.scenarios,
+  );
+  if (!scenarioOrErr.ok) return sendError(res, 400, scenarioOrErr.error);
+
+  // Validate overrides via the same path as /api/run-scenario so the wire
+  // contract is identical for both retry and ad-hoc runs.
+  const validation = parseRunScenarioBody(
+    { scenario: scenarioOrErr.scenario, ticketId, overrides: b.overrides },
+    ctx.scenarios,
+  );
+  if (!validation.ok) return sendError(res, 400, validation.error);
+
+  // clearErrored first — strips the agent-error label and posts a "retried by
+  // user" comment. If this fails we do NOT spawn the run, so the ticket stays
+  // labelled and the queue won't loop on a bad-actor retry button.
+  try {
+    await ctx.backlogManager.clearErrored(ticketId);
+  } catch (err) {
+    return sendError(
+      res,
+      502,
+      `clearErrored failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  let started: RunScenarioStarted;
+  try {
+    started = await ctx.runScenario(validation.request);
+  } catch (err) {
+    return sendError(
+      res,
+      500,
+      `runScenario rejected: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  void started.done.catch(() => {});
   return sendJson(res, 202, { sessionId: started.sessionId });
 };
 

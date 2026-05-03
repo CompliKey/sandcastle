@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 
+import { createAutopilotController } from "./AutopilotController.js";
 import { createEventBroadcaster } from "./EventBroadcaster.js";
 import { createEventStore } from "./EventStore.js";
 import { createGitDiffService } from "./GitDiffService.js";
@@ -1043,6 +1044,32 @@ const uiCommand = Command.make(
         return Promise.resolve({ sessionId, done });
       };
 
+      // Autopilot controller — only useful when a backlog manager is present
+      // (the controller drives `runScenario` and reads pending tickets via
+      // `backlogManager`). The controller's loop shares the EventStore with
+      // manual runs, so the live UI sees both kinds of activity on one
+      // timeline. `manualRunAc` is the host-shutdown signal: a UI-driven
+      // `stop` aborts only the loop's scheduling signal (so no new ticket is
+      // picked up), while any in-flight child keeps running until it exits
+      // naturally. A SIGTERM/SIGINT against the host process aborts both.
+      const autopilot =
+        backlogManager !== undefined
+          ? createAutopilotController({
+              backlogManager,
+              runScenario: ({ scenario, ticketId }) => {
+                const meta = scenarioOptions?.find((s) => s.name === scenario);
+                return runScenario({
+                  scenario,
+                  ticketId,
+                  configPath,
+                  store,
+                  signal: manualRunAc.signal,
+                  maxIterations: meta?.maxIterations,
+                });
+              },
+            })
+          : undefined;
+
       const server = yield* Effect.tryPromise({
         try: () =>
           startUiServer({
@@ -1060,6 +1087,7 @@ const uiCommand = Command.make(
             ...(backlogManager !== undefined
               ? { runScenario: runScenarioRequest }
               : {}),
+            ...(autopilot !== undefined ? { autopilot } : {}),
           }),
         catch: (err) => {
           const isAddrInUse =
@@ -1137,6 +1165,7 @@ const uiCommand = Command.make(
             process.removeListener("SIGTERM", onSignal);
             process.removeListener("SIGINT", onSignal);
             process.removeListener("SIGHUP", onSignal);
+            if (autopilot) await autopilot.shutdown();
             await server.close();
             await bridgeDone;
             await store.close();

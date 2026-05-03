@@ -89,8 +89,24 @@ export interface AgentToolCallEvent extends EventBase {
   readonly type: "agent.toolCall";
   readonly sessionId: string;
   readonly iteration: number;
+  /**
+   * Provider-specific tool-use id, used by {@link AgentToolResultEvent} to
+   * pair a result back to its call. Optional because pre-VGD-141 events on
+   * disk and non-Claude providers may omit it.
+   */
+  readonly toolUseId?: string;
   readonly toolName: string;
   readonly formattedArgs: string;
+}
+
+export interface AgentToolResultEvent extends EventBase {
+  readonly type: "agent.toolResult";
+  readonly sessionId: string;
+  readonly iteration: number;
+  /** Matches the {@link AgentToolCallEvent.toolUseId} of the originating call. */
+  readonly toolUseId: string;
+  readonly result: string;
+  readonly isError: boolean;
 }
 
 export interface CommitEvent extends EventBase {
@@ -120,6 +136,7 @@ export type SandcastleEvent =
   | IterationEndEvent
   | AgentTextEvent
   | AgentToolCallEvent
+  | AgentToolResultEvent
   | CommitEvent
   | ErrorEvent
   | UserLogEvent;

@@ -1,7 +1,13 @@
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
   | { type: "result"; result: string }
-  | { type: "tool_call"; name: string; args: string }
+  | { type: "tool_call"; id?: string; name: string; args: string }
+  | {
+      type: "tool_result";
+      toolUseId: string;
+      result: string;
+      isError: boolean;
+    }
   | { type: "session_id"; sessionId: string };
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
@@ -21,11 +27,27 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
   return undefined;
+};
+
+const flattenToolResultContent = (raw: unknown): string => {
+  if (typeof raw === "string") return raw;
+  if (!Array.isArray(raw)) return "";
+  const parts: string[] = [];
+  for (const block of raw as { type?: string; text?: string }[]) {
+    if (block?.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("");
 };
 
 const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
@@ -38,6 +60,7 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
       for (const block of obj.message.content as {
         type: string;
         text?: string;
+        id?: string;
         name?: string;
         input?: Record<string, unknown>;
       }[]) {
@@ -56,15 +79,40 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
             events.push({ type: "text", text: texts.join("") });
             texts.length = 0;
           }
-          events.push({
+          const call: ParsedStreamEvent = {
             type: "tool_call",
             name: block.name,
             args: argValue,
-          });
+          };
+          if (typeof block.id === "string") call.id = block.id;
+          events.push(call);
         }
       }
       if (texts.length > 0) {
         events.push({ type: "text", text: texts.join("") });
+      }
+      return events;
+    }
+    // Tool results land in user-role messages with tool_result content blocks.
+    if (obj.type === "user" && Array.isArray(obj.message?.content)) {
+      const events: ParsedStreamEvent[] = [];
+      for (const block of obj.message.content as {
+        type?: string;
+        tool_use_id?: string;
+        content?: unknown;
+        is_error?: boolean;
+      }[]) {
+        if (
+          block?.type === "tool_result" &&
+          typeof block.tool_use_id === "string"
+        ) {
+          events.push({
+            type: "tool_result",
+            toolUseId: block.tool_use_id,
+            result: flattenToolResultContent(block.content),
+            isError: block.is_error === true,
+          });
+        }
       }
       return events;
     }

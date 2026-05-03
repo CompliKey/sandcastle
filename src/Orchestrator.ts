@@ -31,7 +31,8 @@ const invokeAgent = (
   provider: AgentProvider,
   idleTimeoutMs: number,
   onText: (text: string) => void,
-  onToolCall: (name: string, formattedArgs: string) => void,
+  onToolCall: (name: string, formattedArgs: string, toolUseId?: string) => void,
+  onToolResult: (toolUseId: string, result: string, isError: boolean) => void,
   onIdleWarning: (minutes: number) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
@@ -109,7 +110,9 @@ const invokeAgent = (
             } else if (parsed.type === "result") {
               resultText = parsed.result;
             } else if (parsed.type === "tool_call") {
-              onToolCall(parsed.name, parsed.args);
+              onToolCall(parsed.name, parsed.args, parsed.id);
+            } else if (parsed.type === "tool_result") {
+              onToolResult(parsed.toolUseId, parsed.result, parsed.isError);
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
             }
@@ -127,9 +130,7 @@ const invokeAgent = (
           errorDetail = resultText;
         }
         if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
+          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
         return yield* Effect.fail(
@@ -326,14 +327,36 @@ export const orchestrate = (
                 const onText = (text: string) => {
                   textBuffer.write(text);
                 };
-                const onToolCall = (name: string, formattedArgs: string) => {
+                const onToolCall = (
+                  name: string,
+                  formattedArgs: string,
+                  toolUseId?: string,
+                ) => {
                   textBuffer.flush();
                   Effect.runPromise(display.toolCall(name, formattedArgs));
                   Effect.runPromise(
                     streamEmitter.emit({
                       type: "toolCall",
+                      toolUseId,
                       name,
                       formattedArgs,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
+                const onToolResult = (
+                  toolUseId: string,
+                  result: string,
+                  isError: boolean,
+                ) => {
+                  textBuffer.flush();
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "toolResult",
+                      toolUseId,
+                      result,
+                      isError,
                       iteration: i,
                       timestamp: new Date(),
                     }),
@@ -354,6 +377,7 @@ export const orchestrate = (
                   idleTimeoutMs,
                   onText,
                   onToolCall,
+                  onToolResult,
                   onIdleWarning,
                   options._idleWarningIntervalMs,
                   iterationResumeSession,

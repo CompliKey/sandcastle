@@ -69,7 +69,53 @@ export const ToolCallCard = ({ toolCall }: ToolCallCardProps): ReactElement => {
             </pre>
           )}
         </div>
+        {toolCall.result !== undefined && (
+          <ToolCallResult
+            result={toolCall.result}
+            isError={toolCall.isError ?? false}
+          />
+        )}
       </div>
     </article>
+  );
+};
+
+const RESULT_LINE_THRESHOLD = 30;
+
+const ToolCallResult = ({
+  result,
+  isError,
+}: {
+  readonly result: string;
+  readonly isError: boolean;
+}): ReactElement => {
+  const lineCount = result.split("\n").length;
+  const isLong = lineCount > RESULT_LINE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!isLong);
+
+  return (
+    <div>
+      <div className="tool-card__section-label">
+        {isError ? "Result (error)" : "Result"}
+      </div>
+      {isLong && !expanded ? (
+        <button
+          type="button"
+          className="disclosure"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(true);
+          }}
+        >
+          {lineCount} lines — click to expand
+        </button>
+      ) : (
+        <pre
+          className={`tool-card__pre${isError ? " tool-card__pre--error" : ""}`}
+        >
+          {result}
+        </pre>
+      )}
+    </div>
   );
 };

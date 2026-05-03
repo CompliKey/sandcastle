@@ -37,6 +37,9 @@ export interface SessionIterationView {
     toolName: string;
     formattedArgs: string;
     timestamp: number;
+    toolUseId?: string;
+    result?: string;
+    isError?: boolean;
   }>;
   texts: ReadonlyArray<{ text: string; timestamp: number }>;
   userLogs: ReadonlyArray<{ payload: unknown; timestamp: number }>;
@@ -138,8 +141,17 @@ export type SandcastleEvent =
       type: "agent.toolCall";
       sessionId: string;
       iteration: number;
+      toolUseId?: string;
       toolName: string;
       formattedArgs: string;
+    })
+  | (EventBase & {
+      type: "agent.toolResult";
+      sessionId: string;
+      iteration: number;
+      toolUseId: string;
+      result: string;
+      isError: boolean;
     })
   | (EventBase & { type: "commit"; sessionId: string; sha: string })
   | (EventBase & {

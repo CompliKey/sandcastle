@@ -94,10 +94,19 @@ export const createIterationBoundaryTracker = (
           iteration: it,
           text: event.message,
         });
+      } else if (event.type === "toolResult") {
+        send({
+          kind: "agent.toolResult",
+          iteration: it,
+          toolUseId: event.toolUseId,
+          result: event.result,
+          isError: event.isError,
+        });
       } else {
         send({
           kind: "agent.toolCall",
           iteration: it,
+          toolUseId: event.toolUseId,
           toolName: event.name,
           formattedArgs: event.formattedArgs,
         });

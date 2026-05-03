@@ -108,9 +108,37 @@ export const applyEventToView = (
             toolName: event.toolName,
             formattedArgs: event.formattedArgs,
             timestamp: event.timestamp,
+            toolUseId: event.toolUseId,
           },
         ],
       }));
+    case "agent.toolResult": {
+      // Pair with the originating call by toolUseId — search newest first.
+      // Orphan results (no matching call) are no-ops; we return the same
+      // view reference so React skips a re-render.
+      const idx = view.iterations.findIndex(
+        (it) => it.iteration === event.iteration,
+      );
+      if (idx === -1) return view;
+      const it = view.iterations[idx]!;
+      let pairedAt = -1;
+      for (let i = it.toolCalls.length - 1; i >= 0; i--) {
+        if (it.toolCalls[i]!.toolUseId === event.toolUseId) {
+          pairedAt = i;
+          break;
+        }
+      }
+      if (pairedAt === -1) return view;
+      const nextCalls = it.toolCalls.slice();
+      nextCalls[pairedAt] = {
+        ...nextCalls[pairedAt]!,
+        result: event.result,
+        isError: event.isError,
+      };
+      const nextIterations = view.iterations.slice();
+      nextIterations[idx] = { ...it, toolCalls: nextCalls };
+      return { ...view, iterations: nextIterations };
+    }
     case "user.log": {
       // Bucket user.log under the most recent iteration, matching backend.
       const last = view.iterations[view.iterations.length - 1];

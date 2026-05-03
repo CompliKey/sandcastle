@@ -16,8 +16,17 @@ export type AgentStreamEvent =
     }
   | {
       readonly type: "toolCall";
+      readonly toolUseId?: string;
       readonly name: string;
       readonly formattedArgs: string;
+      readonly iteration: number;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: "toolResult";
+      readonly toolUseId: string;
+      readonly result: string;
+      readonly isError: boolean;
       readonly iteration: number;
       readonly timestamp: Date;
     };

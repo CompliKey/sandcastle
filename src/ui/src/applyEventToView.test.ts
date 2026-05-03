@@ -143,6 +143,76 @@ describe("applyEventToView", () => {
     ]);
   });
 
+  it("pairs an agent.toolResult with its matching tool call by toolUseId", () => {
+    let view = applyEventToView(baseView(), {
+      type: "iteration.start",
+      laneId: "main",
+      timestamp: 110,
+      sessionId: "ses_a",
+      iteration: 1,
+      startedAt: 110,
+    });
+    view = applyEventToView(view, {
+      type: "agent.toolCall",
+      laneId: "main",
+      timestamp: 120,
+      sessionId: "ses_a",
+      iteration: 1,
+      toolUseId: "toolu_a",
+      toolName: "Bash",
+      formattedArgs: '{"command":"ls"}',
+    });
+    view = applyEventToView(view, {
+      type: "agent.toolResult",
+      laneId: "main",
+      timestamp: 130,
+      sessionId: "ses_a",
+      iteration: 1,
+      toolUseId: "toolu_a",
+      result: "file1\nfile2\n",
+      isError: false,
+    });
+    expect(view.iterations[0]?.toolCalls[0]).toMatchObject({
+      toolName: "Bash",
+      result: "file1\nfile2\n",
+      isError: false,
+    });
+  });
+
+  it("drops an orphan agent.toolResult with no matching tool call", () => {
+    let view = applyEventToView(baseView(), {
+      type: "iteration.start",
+      laneId: "main",
+      timestamp: 110,
+      sessionId: "ses_a",
+      iteration: 1,
+      startedAt: 110,
+    });
+    view = applyEventToView(view, {
+      type: "agent.toolCall",
+      laneId: "main",
+      timestamp: 120,
+      sessionId: "ses_a",
+      iteration: 1,
+      toolUseId: "toolu_a",
+      toolName: "Bash",
+      formattedArgs: '{"command":"ls"}',
+    });
+    const before = view;
+    const after = applyEventToView(view, {
+      type: "agent.toolResult",
+      laneId: "main",
+      timestamp: 130,
+      sessionId: "ses_a",
+      iteration: 1,
+      toolUseId: "toolu_orphan",
+      result: "should drop",
+      isError: false,
+    });
+    expect(after.iterations[0]?.toolCalls[0]?.result).toBeUndefined();
+    expect(after).toBe(before); // no-op when nothing pairs
+  });
+
   it("ignores events for other sessions", () => {
     const view = baseView();
     const next = applyEventToView(view, {

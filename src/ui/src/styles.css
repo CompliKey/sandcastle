@@ -735,6 +735,12 @@ code,
   color: var(--c-violet-200);
 }
 
+.tool-card__pre--error {
+  background: var(--c-error-bg);
+  border-color: var(--c-error-border);
+  color: var(--c-error);
+}
+
 .disclosure {
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);

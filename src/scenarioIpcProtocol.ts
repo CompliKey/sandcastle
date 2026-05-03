@@ -67,8 +67,18 @@ export interface AgentTextMessage {
 export interface AgentToolCallMessage {
   readonly kind: "agent.toolCall";
   readonly iteration: number;
+  /** Provider-specific tool-use id; absent for non-Claude providers. */
+  readonly toolUseId?: string;
   readonly toolName: string;
   readonly formattedArgs: string;
+}
+
+export interface AgentToolResultMessage {
+  readonly kind: "agent.toolResult";
+  readonly iteration: number;
+  readonly toolUseId: string;
+  readonly result: string;
+  readonly isError: boolean;
 }
 
 export interface CommitMessage {
@@ -94,6 +104,7 @@ export type ScenarioChildMessage =
   | IterationEndMessage
   | AgentTextMessage
   | AgentToolCallMessage
+  | AgentToolResultMessage
   | CommitMessage
   | ErrorMessage
   | UserLogMessage;
@@ -109,6 +120,7 @@ export const isScenarioChildMessage = (
     case "iteration.end":
     case "agent.text":
     case "agent.toolCall":
+    case "agent.toolResult":
     case "commit":
     case "error":
     case "user.log":
@@ -172,8 +184,18 @@ export const messageToEvent = (
         ...base,
         type: "agent.toolCall",
         iteration: msg.iteration,
+        toolUseId: msg.toolUseId,
         toolName: msg.toolName,
         formattedArgs: msg.formattedArgs,
+      };
+    case "agent.toolResult":
+      return {
+        ...base,
+        type: "agent.toolResult",
+        iteration: msg.iteration,
+        toolUseId: msg.toolUseId,
+        result: msg.result,
+        isError: msg.isError,
       };
     case "commit":
       return { ...base, type: "commit", sha: msg.sha };

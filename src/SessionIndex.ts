@@ -47,6 +47,10 @@ export interface SessionIterationView {
     readonly toolName: string;
     readonly formattedArgs: string;
     readonly timestamp: number;
+    readonly toolUseId?: string;
+    /** Set once a matching `agent.toolResult` event arrives (Claude Code only). */
+    readonly result?: string;
+    readonly isError?: boolean;
   }>;
   readonly texts: ReadonlyArray<{
     readonly text: string;
@@ -125,12 +129,21 @@ export interface SessionIndex {
 // Internals — mutable state, frozen on read
 // ---------------------------------------------------------------------------
 
+type ToolCallState = {
+  toolName: string;
+  formattedArgs: string;
+  timestamp: number;
+  toolUseId?: string;
+  result?: string;
+  isError?: boolean;
+};
+
 interface IterationState {
   iteration: number;
   startedAt?: number;
   endedAt?: number;
   usage?: EventIterationUsage;
-  toolCalls: SessionIterationView["toolCalls"][number][];
+  toolCalls: ToolCallState[];
   texts: SessionIterationView["texts"][number][];
   userLogs: SessionIterationView["userLogs"][number][];
 }
@@ -300,7 +313,25 @@ export const createSessionIndex = (): SessionIndex => {
           toolName: event.toolName,
           formattedArgs: event.formattedArgs,
           timestamp: event.timestamp,
+          toolUseId: event.toolUseId,
         });
+        return;
+      }
+      case "agent.toolResult": {
+        const s = sessions.get(event.sessionId);
+        if (!s) return;
+        const it = ensureIteration(s, event.iteration);
+        // Pair with the originating call by toolUseId. We search the most
+        // recent calls first since results typically follow their calls
+        // closely in time. Orphan results (no matching call) are dropped.
+        for (let i = it.toolCalls.length - 1; i >= 0; i--) {
+          const call = it.toolCalls[i]!;
+          if (call.toolUseId === event.toolUseId) {
+            call.result = event.result;
+            call.isError = event.isError;
+            return;
+          }
+        }
         return;
       }
       case "user.log": {

@@ -1,0 +1,395 @@
+/**
+ * UiServer — local HTTP+WS server that surfaces session history and
+ * (in later slices) live agent activity.
+ *
+ * Pure I/O adapter over {@link SessionIndex}. No Effect, no global state —
+ * the CLI wires it up with a populated index and starts/stops it.
+ *
+ * Surface
+ * - REST: `/api/sessions`, `/api/sessions/:id`, `/api/tickets/:id/sessions`
+ * - WS:   `/ws` — accepts upgrades; no broadcast in this slice.
+ *         Slice 8 fills in live event push.
+ * - Static: every other GET serves files from `assetsDir` (the bundled
+ *   frontend), falling back to `index.html` for client-side SPA routing.
+ *
+ * Single-instance protocol
+ * - On {@link startUiServer} the caller may pass `lockfilePath`. If the
+ *   chosen port is busy, {@link probeExistingServer} should be called by
+ *   the caller to decide whether to hand off to the running instance.
+ * - The lockfile is purely advisory — the trust check is a `GET /api/health`
+ *   that returns `{ application: "sandcastle" }`.
+ */
+
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from "node:http";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import {
+  extname,
+  join,
+  normalize,
+  resolve as resolvePath,
+  sep,
+} from "node:path";
+
+import type { SessionIndex } from "./SessionIndex.js";
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export interface UiServerOptions {
+  readonly index: SessionIndex;
+  /**
+   * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
+   * directory is missing, the server returns a small placeholder page —
+   * useful in tests and during early development before the frontend is
+   * built.
+   */
+  readonly assetsDir?: string;
+  /** Default `127.0.0.1`. Bind only to loopback. */
+  readonly host?: string;
+  /** Default `4321`. Pass `0` to let the OS pick a free port. */
+  readonly port?: number;
+  /** Reported by `/api/health`. Defaults to `"sandcastle"`. */
+  readonly application?: string;
+  /** Reported by `/api/health`. */
+  readonly version?: string;
+}
+
+export interface UiServer {
+  readonly url: string;
+  readonly port: number;
+  readonly host: string;
+  close(): Promise<void>;
+}
+
+export interface HealthPayload {
+  readonly application: string;
+  readonly version?: string;
+  readonly pid: number;
+  readonly startedAt: number;
+}
+
+export const DEFAULT_UI_PORT = 4321;
+export const DEFAULT_UI_HOST = "127.0.0.1";
+export const UI_LOCKFILE_NAME = "ui.lock";
+
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+
+export const startUiServer = async (
+  opts: UiServerOptions,
+): Promise<UiServer> => {
+  const host = opts.host ?? DEFAULT_UI_HOST;
+  const port = opts.port ?? DEFAULT_UI_PORT;
+  const application = opts.application ?? "sandcastle";
+  const startedAt = Date.now();
+  const assetsDir = opts.assetsDir ? resolvePath(opts.assetsDir) : undefined;
+
+  const server = createHttpServer((req, res) => {
+    handleRequest(req, res, {
+      index: opts.index,
+      assetsDir,
+      health: {
+        application,
+        version: opts.version,
+        pid: process.pid,
+        startedAt,
+      },
+    }).catch((err) => {
+      sendError(res, 500, err instanceof Error ? err.message : String(err));
+    });
+  });
+
+  // WebSocket upgrades land here. Slice 7 only accepts the upgrade and
+  // closes immediately — slice 8 swaps in the real event broadcaster.
+  server.on("upgrade", (req, socket) => {
+    if (!req.url || !req.url.startsWith("/ws")) {
+      socket.destroy();
+      return;
+    }
+    // Minimal RFC 6455 handshake response so a client `new WebSocket(...)` does
+    // not throw before slice 8 is wired up. We then immediately close the
+    // connection — no protocol framing yet.
+    socket.end();
+  });
+
+  await listen(server, port, host);
+  const address = server.address();
+  const boundPort =
+    typeof address === "object" && address ? address.port : port;
+  const url = `http://${host}:${boundPort}`;
+
+  return {
+    url,
+    port: boundPort,
+    host,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      }),
+  };
+};
+
+const listen = (
+  server: HttpServer,
+  port: number,
+  host: string,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException): void => {
+      server.removeListener("listening", onListening);
+      reject(err);
+    };
+    const onListening = (): void => {
+      server.removeListener("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, host);
+  });
+
+// ---------------------------------------------------------------------------
+// Single-instance protocol
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask the server at `url` whether it is a sandcastle UI server.
+ *
+ * Returns the health payload on success, `null` on any failure (network,
+ * non-200, mismatched `application` field, parse error). The caller treats
+ * `null` as "no living sandcastle UI server here" and is free to start one.
+ *
+ * Times out after `timeoutMs` (default 1000ms).
+ */
+export const probeExistingServer = async (
+  url: string,
+  options: { readonly timeoutMs?: number; readonly application?: string } = {},
+): Promise<HealthPayload | null> => {
+  const application = options.application ?? "sandcastle";
+  const timeoutMs = options.timeoutMs ?? 1000;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/api/health`, {
+      signal: ac.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as Partial<HealthPayload>;
+    if (
+      typeof body.application !== "string" ||
+      body.application !== application
+    ) {
+      return null;
+    }
+    return {
+      application: body.application,
+      version: body.version,
+      pid: typeof body.pid === "number" ? body.pid : -1,
+      startedAt: typeof body.startedAt === "number" ? body.startedAt : 0,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Request handling
+// ---------------------------------------------------------------------------
+
+interface HandlerCtx {
+  readonly index: SessionIndex;
+  readonly assetsDir?: string;
+  readonly health: HealthPayload;
+}
+
+const handleRequest = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: HandlerCtx,
+): Promise<void> => {
+  if (!req.url) return sendError(res, 400, "missing url");
+  const method = req.method ?? "GET";
+  if (method !== "GET" && method !== "HEAD") {
+    return sendError(res, 405, "method not allowed");
+  }
+
+  // URL parsing — the host header isn't always trustworthy, but for query
+  // string handling a placeholder origin is fine.
+  const url = new URL(req.url, "http://localhost");
+  const { pathname } = url;
+
+  if (pathname === "/api/health") {
+    return sendJson(res, 200, ctx.health);
+  }
+
+  if (pathname === "/api/sessions") {
+    const limit = parseIntParam(url.searchParams.get("limit"));
+    const since = parseIntParam(url.searchParams.get("since"));
+    const sessions = ctx.index.listSessions({
+      limit: limit ?? undefined,
+      since: since ?? undefined,
+    });
+    return sendJson(res, 200, { sessions });
+  }
+
+  const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
+  if (sessionMatch) {
+    const session = ctx.index.getSession(decodeURIComponent(sessionMatch[1]!));
+    if (!session) return sendError(res, 404, "session not found");
+    return sendJson(res, 200, { session });
+  }
+
+  const ticketMatch = pathname.match(/^\/api\/tickets\/([^/]+)\/sessions$/);
+  if (ticketMatch) {
+    const ticketId = decodeURIComponent(ticketMatch[1]!);
+    const sessions = ctx.index.listByTicket(ticketId);
+    return sendJson(res, 200, { ticketId, sessions });
+  }
+
+  if (pathname.startsWith("/api/")) {
+    return sendError(res, 404, "unknown api endpoint");
+  }
+
+  // Static: serve from assetsDir, with SPA fallback to index.html.
+  await serveStatic(res, pathname, ctx.assetsDir);
+};
+
+const parseIntParam = (raw: string | null): number | null => {
+  if (raw === null) return null;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+};
+
+// ---------------------------------------------------------------------------
+// Static asset serving
+// ---------------------------------------------------------------------------
+
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ico": "image/x-icon",
+  ".map": "application/json; charset=utf-8",
+};
+
+const serveStatic = async (
+  res: ServerResponse,
+  pathname: string,
+  assetsDir: string | undefined,
+): Promise<void> => {
+  if (!assetsDir) {
+    return sendPlaceholder(res);
+  }
+
+  const requestedPath = pathname === "/" ? "/index.html" : pathname;
+  const safe = resolveSafe(assetsDir, requestedPath);
+  if (!safe) return sendError(res, 400, "invalid path");
+
+  const fileToServe = await pickFile(assetsDir, safe);
+  if (!fileToServe) return sendError(res, 404, "not found");
+
+  const ext = extname(fileToServe).toLowerCase();
+  const type = MIME[ext] ?? "application/octet-stream";
+  res.statusCode = 200;
+  res.setHeader("content-type", type);
+  // Hashed asset names (Vite default) are immutable — long-cache them.
+  if (/[-.][0-9a-zA-Z_-]{8,}\.\w+$/.test(fileToServe)) {
+    res.setHeader("cache-control", "public, max-age=31536000, immutable");
+  } else {
+    res.setHeader("cache-control", "no-cache");
+  }
+  await new Promise<void>((resolveStream, rejectStream) => {
+    const stream = createReadStream(fileToServe);
+    stream.on("error", rejectStream);
+    stream.on("end", () => resolveStream());
+    stream.pipe(res);
+  });
+};
+
+/** Reject path traversal — only allow paths under `root`. */
+const resolveSafe = (root: string, requested: string): string | null => {
+  const joined = normalize(join(root, requested));
+  const rootNormalised = normalize(root + sep);
+  if (joined !== normalize(root) && !joined.startsWith(rootNormalised)) {
+    return null;
+  }
+  return joined;
+};
+
+const pickFile = async (
+  assetsDir: string,
+  candidate: string,
+): Promise<string | null> => {
+  const direct = await statOrNull(candidate);
+  if (direct?.isFile()) return candidate;
+  // SPA fallback — every unknown route renders index.html so the React
+  // router can take over.
+  const indexHtml = join(assetsDir, "index.html");
+  const indexStat = await statOrNull(indexHtml);
+  return indexStat?.isFile() ? indexHtml : null;
+};
+
+const statOrNull = async (
+  path: string,
+): Promise<Awaited<ReturnType<typeof stat>> | null> => {
+  try {
+    return await stat(path);
+  } catch {
+    return null;
+  }
+};
+
+const sendPlaceholder = (res: ServerResponse): void => {
+  res.statusCode = 200;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(
+    `<!doctype html><meta charset=utf-8><title>sandcastle ui</title>` +
+      `<body style="font-family:system-ui;padding:2rem;color:#444">` +
+      `<h1>sandcastle ui</h1>` +
+      `<p>The bundled frontend is not built yet. Run <code>npm run build</code> ` +
+      `inside the sandcastle repo to populate <code>dist/ui/</code>.</p>` +
+      `<p>The REST API is live: ` +
+      `<a href="/api/sessions">/api/sessions</a>, ` +
+      `<a href="/api/health">/api/health</a>.</p></body>`,
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("cache-control", "no-store");
+  res.end(JSON.stringify(body));
+};
+
+const sendError = (
+  res: ServerResponse,
+  status: number,
+  message: string,
+): void => {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify({ error: message }));
+};

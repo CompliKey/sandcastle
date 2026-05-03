@@ -11,6 +11,17 @@ import { createEventStore } from "./EventStore.js";
 import { createFailureCoordinator } from "./FailureCoordinator.js";
 import { runOrchestrationLoop } from "./OrchestrationLoop.js";
 import { runScenario } from "./ScenarioRunner.js";
+import { createSessionIndex } from "./SessionIndex.js";
+import {
+  DEFAULT_UI_HOST,
+  DEFAULT_UI_PORT,
+  probeExistingServer,
+  startUiServer,
+} from "./UiServer.js";
+import { readLockfile, removeLockfile, writeLockfile } from "./UiLockfile.js";
+import { openBrowser } from "./openBrowser.js";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Display } from "./Display.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
@@ -864,6 +875,185 @@ const autopilotCommand = Command.make(
     }),
 );
 
+// --- ui command ---
+
+/**
+ * `sandcastle ui` — boots the local UI server, replays the event log into a
+ * SessionIndex, opens the user's browser, and stays in the foreground until
+ * SIGINT/SIGTERM (closing the launching terminal kills it).
+ *
+ * Single-instance protocol: a second invocation reads the lockfile, probes
+ * `/api/health`, and — if the prior server is alive — opens a new tab against
+ * it instead of erroring on `EADDRINUSE`.
+ */
+
+const uiPortOption = Options.integer("port").pipe(
+  Options.withDescription(
+    `Port to bind the UI server to (default: ${DEFAULT_UI_PORT}).`,
+  ),
+  Options.optional,
+);
+
+const uiHostOption = Options.text("host").pipe(
+  Options.withDescription(
+    `Host interface to bind to (default: ${DEFAULT_UI_HOST}). Leave as loopback unless you know what you're doing.`,
+  ),
+  Options.optional,
+);
+
+const uiNoOpenOption = Options.boolean("no-open").pipe(
+  Options.withDescription(
+    "Do not auto-open the browser. Useful for headless / SSH workflows.",
+  ),
+);
+
+const uiAssetsDirOption = Options.directory("assets-dir").pipe(
+  Options.withDescription(
+    "Override the bundled frontend directory (defaults to dist/ui/ next to the CLI).",
+  ),
+  Options.optional,
+);
+
+const defaultAssetsDir = (): string => {
+  // dist/cli.js → dist/ui
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  return join(cliDir, "ui");
+};
+
+const uiCommand = Command.make(
+  "ui",
+  {
+    port: uiPortOption,
+    host: uiHostOption,
+    noOpen: uiNoOpenOption,
+    assetsDir: uiAssetsDirOption,
+  },
+  ({ port, host, noOpen, assetsDir }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      yield* requireConfigDir(cwd);
+
+      const stateDir = resolvePath(cwd, ".sandcastle", "state");
+      const resolvedHost = host._tag === "Some" ? host.value : DEFAULT_UI_HOST;
+      const resolvedPort = port._tag === "Some" ? port.value : DEFAULT_UI_PORT;
+
+      // 1. Single-instance hand-off via the lockfile + health probe.
+      const existing = yield* Effect.promise(() => readLockfile(stateDir));
+      if (existing) {
+        const probed = yield* Effect.promise(() =>
+          probeExistingServer(existing.url),
+        );
+        if (probed) {
+          yield* d.status(
+            `sandcastle ui already running at ${existing.url} (pid ${probed.pid}).`,
+            "info",
+          );
+          if (!noOpen) {
+            openBrowser(existing.url);
+            yield* d.text(`Opened a new browser tab.`);
+          } else {
+            yield* d.text(`URL: ${existing.url}`);
+          }
+          return;
+        }
+        // Lockfile points at a corpse — clean it up before we try to bind.
+        yield* Effect.promise(() => removeLockfile(stateDir));
+      }
+
+      // 2. Replay the event log into a fresh SessionIndex.
+      const store = createEventStore({ dir: stateDir });
+      const index = createSessionIndex();
+      yield* Effect.promise(async () => {
+        for await (const { event } of store.replay()) {
+          index.add(event);
+        }
+      });
+
+      const resolvedAssetsDir =
+        assetsDir._tag === "Some" ? assetsDir.value : defaultAssetsDir();
+
+      // 3. Start the server.
+      const server = yield* Effect.tryPromise({
+        try: () =>
+          startUiServer({
+            index,
+            host: resolvedHost,
+            port: resolvedPort,
+            assetsDir: resolvedAssetsDir,
+            version: VERSION,
+          }),
+        catch: (err) => {
+          const isAddrInUse =
+            typeof err === "object" &&
+            err !== null &&
+            (err as NodeJS.ErrnoException).code === "EADDRINUSE";
+          return new InitError({
+            message: isAddrInUse
+              ? `Port ${resolvedPort} is already in use, but no sandcastle UI server responded on it. Stop the other process or pass --port=<n>.`
+              : `Failed to start UI server: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+          });
+        },
+      });
+
+      // 4. Persist the lockfile so a second invocation can find us.
+      yield* Effect.promise(() =>
+        writeLockfile(stateDir, {
+          pid: process.pid,
+          host: server.host,
+          port: server.port,
+          url: server.url,
+          startedAt: Date.now(),
+        }),
+      );
+
+      // 5. Wire signal handlers + foreground await.
+      const shutdownSignal = new AbortController();
+      const onSignal = (): void => shutdownSignal.abort();
+      process.once("SIGTERM", onSignal);
+      process.once("SIGINT", onSignal);
+      // SIGHUP fires when the controlling terminal closes — making the
+      // foreground-binding contract explicit ("close the terminal, kill the
+      // server") cross-platform.
+      process.once("SIGHUP", onSignal);
+
+      yield* d.status(`sandcastle ui listening on ${server.url}`, "success");
+      yield* d.text(`State directory: ${stateDir}`);
+      yield* d.text(`Press Ctrl+C to stop.`);
+
+      if (!noOpen) {
+        openBrowser(server.url);
+      }
+
+      yield* Effect.async<void>((resume) => {
+        if (shutdownSignal.signal.aborted) {
+          resume(Effect.void);
+          return;
+        }
+        shutdownSignal.signal.addEventListener(
+          "abort",
+          () => resume(Effect.void),
+          { once: true },
+        );
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(async () => {
+            process.removeListener("SIGTERM", onSignal);
+            process.removeListener("SIGINT", onSignal);
+            process.removeListener("SIGHUP", onSignal);
+            await server.close();
+            await store.close();
+            await removeLockfile(stateDir);
+          }),
+        ),
+      );
+
+      yield* d.status("sandcastle ui stopped.", "info");
+    }),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -883,6 +1073,7 @@ export const sandcastle = rootCommand.pipe(
     queueCommand,
     runScenarioCommand,
     autopilotCommand,
+    uiCommand,
   ]),
 );
 

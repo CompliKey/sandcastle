@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { SessionView } from "../api.js";
 import { formatStartedAt } from "../format.js";
 import { useLiveSession } from "../useLiveSession.js";
+import { CommitsPanel } from "./CommitsPanel.js";
 import { IterationSection } from "./IterationSection.js";
 import { MetricsHeader } from "./MetricsHeader.js";
 import { useAutoscrollPin } from "./useAutoscrollPin.js";
@@ -132,6 +133,7 @@ export const LiveSessionView = ({
             })
           )}
         </main>
+        <CommitsPanel sessionId={view.sessionId} commits={view.commits} />
       </div>
     </>
   );

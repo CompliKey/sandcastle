@@ -103,7 +103,8 @@ export const LiveSessionView = ({
           {!pinned && isLive && (
             <div className="timeline__autoscroll-hint">
               <span className="badge">
-                📌 autoscroll paused — scroll to bottom to resume
+                <span aria-hidden="true">📌 </span>
+                autoscroll paused — scroll to bottom to resume
               </span>
             </div>
           )}

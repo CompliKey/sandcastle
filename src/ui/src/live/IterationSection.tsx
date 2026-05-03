@@ -83,7 +83,10 @@ export const IterationSection = ({
         ) : (
           <>
             {iteration.toolCalls.map((tc, idx) => (
-              <ToolCallCard key={`${tc.timestamp}-${idx}`} toolCall={tc} />
+              <ToolCallCard
+                key={tc.toolUseId ?? `${tc.timestamp}-${idx}`}
+                toolCall={tc}
+              />
             ))}
           </>
         )}

@@ -47,6 +47,12 @@ export const useLiveSession = (
 
     ws.addEventListener("open", () => setConnected(true));
 
+    // Buffer events that arrive before the snapshot. The server contract is
+    // snapshot-first, so this should normally stay empty; if it doesn't (e.g.
+    // a server change reorders the protocol), buffering keeps the view
+    // consistent instead of silently dropping events.
+    const preSnapshot: LiveMessage[] = [];
+
     ws.addEventListener("message", (ev) => {
       let msg: LiveMessage;
       try {
@@ -57,13 +63,30 @@ export const useLiveSession = (
         return;
       }
       switch (msg.type) {
-        case "snapshot":
-          setView(msg.view);
-          viewRef.current = msg.view;
+        case "snapshot": {
+          let next = msg.view;
+          if (preSnapshot.length > 0) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[useLiveSession] ${preSnapshot.length} event(s) arrived before snapshot — replaying.`,
+            );
+            for (const buffered of preSnapshot) {
+              if (buffered.type === "event") {
+                next = applyEventToView(next, buffered.event);
+              }
+            }
+            preSnapshot.length = 0;
+          }
+          setView(next);
+          viewRef.current = next;
           return;
+        }
         case "event": {
           const current = viewRef.current;
-          if (!current) return; // stream before snapshot — should not happen
+          if (!current) {
+            preSnapshot.push(msg);
+            return;
+          }
           const next = applyEventToView(current, msg.event);
           viewRef.current = next;
           setView(next);

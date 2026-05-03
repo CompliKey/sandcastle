@@ -1,12 +1,14 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 
+import { createEventStore } from "./EventStore.js";
+import { runScenario } from "./ScenarioRunner.js";
 import { Display } from "./Display.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
@@ -594,6 +596,130 @@ const queueCommand = Command.make("queue", {}, () =>
   }),
 ).pipe(Command.withSubcommands([queueListCommand]));
 
+// --- run-scenario command ---
+
+/**
+ * Run a single scenario invocation against the next pending ticket.
+ *
+ * v1 demoable surface: no autopilot loop, no UI, no JIRA labelling. Pulls
+ * `listPending({ includeErrored: false })` from the user's backlog manager,
+ * picks the head of the list, and invokes the named scenario in a child
+ * process. Events stream back over IPC and persist under
+ * `.sandcastle/state/events.jsonl`.
+ */
+
+const runScenarioConfigOption = Options.file("config").pipe(
+  Options.withDescription(
+    `Path to the sandcastle config (default: ${DEFAULT_CONFIG_PATH})`,
+  ),
+  Options.optional,
+);
+
+const runScenarioNameArg = Args.text({ name: "scenario" }).pipe(
+  Args.withDescription(
+    "Name of the scenario to invoke (must exist in the config's `scenarios`).",
+  ),
+);
+
+const runScenarioCommand = Command.make(
+  "run-scenario",
+  { scenario: runScenarioNameArg, config: runScenarioConfigOption },
+  ({ scenario, config }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const configPath =
+        config._tag === "Some" ? config.value : join(cwd, DEFAULT_CONFIG_PATH);
+
+      yield* requireConfigDir(cwd);
+
+      const loaded = yield* loadSandcastleConfig(configPath);
+      const scenarioMeta = loaded.metadata.scenarios.find(
+        (s) => s.name === scenario,
+      );
+      if (!scenarioMeta) {
+        const names = loaded.metadata.scenarios.map((s) => s.name).join(", ");
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown scenario "${scenario}". Available: ${names || "(none)"}.`,
+          }),
+        );
+      }
+
+      const tickets = yield* Effect.tryPromise({
+        try: () => loaded.backlogManager.listPending({ includeErrored: false }),
+        catch: (err) =>
+          new InitError({
+            message: `Failed to list pending tickets: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          }),
+      });
+
+      if (tickets.length === 0) {
+        yield* d.status(
+          "No pending tickets — nothing to run. Add a ticket and try again.",
+          "info",
+        );
+        return;
+      }
+
+      const ticket = tickets[0]!;
+      yield* d.text(
+        `${styleText("bold", "Scenario:")} ${styleText("cyan", scenario)}`,
+      );
+      yield* d.text(
+        `${styleText("bold", "Ticket:")}  ${styleText("cyan", ticket.id)}  ${ticket.title}`,
+      );
+
+      const eventsDir = resolvePath(cwd, ".sandcastle", "state");
+      const store = createEventStore({ dir: eventsDir });
+
+      // Forward host SIGTERM/SIGINT into the runner's AbortController so the
+      // child gets a clean halt and a `session.end { halted }` lands.
+      const ac = new AbortController();
+      const onSignal = (): void => ac.abort();
+      process.once("SIGTERM", onSignal);
+      process.once("SIGINT", onSignal);
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runScenario({
+            scenario,
+            ticketId: ticket.id,
+            configPath: resolvePath(configPath),
+            store,
+            signal: ac.signal,
+          }),
+        catch: (err) =>
+          new InitError({
+            message: `runScenario failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          }),
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            process.removeListener("SIGTERM", onSignal);
+            process.removeListener("SIGINT", onSignal);
+          }),
+        ),
+        Effect.tap(() => Effect.promise(() => store.close())),
+      );
+
+      const severity =
+        result.outcome === "done"
+          ? "success"
+          : result.outcome === "halted"
+            ? "warn"
+            : "error";
+      yield* d.status(
+        `Scenario "${scenario}" finished: ${result.outcome} (session ${result.sessionId})`,
+        severity,
+      );
+    }),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -611,6 +737,7 @@ export const sandcastle = rootCommand.pipe(
     podmanCommand,
     scenariosCommand,
     queueCommand,
+    runScenarioCommand,
   ]),
 );
 

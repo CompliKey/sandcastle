@@ -35,7 +35,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
-    expect(stdout).not.toContain("run");
+    expect(stdout).toContain("run-scenario");
     expect(stdout).not.toContain("interactive");
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
@@ -58,6 +58,27 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--include-errored");
     expect(stdout).toContain("--config");
     expect(stdout).toContain("agent-error");
+  });
+
+  it("run-scenario --help shows the scenario argument and --config flag", async () => {
+    const { stdout } = await runCli("run-scenario --help", process.cwd());
+    expect(stdout).toContain("<scenario>");
+    expect(stdout).toContain("--config");
+  });
+
+  it("run-scenario errors when .sandcastle/ is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    try {
+      await runCli("run-scenario any-name", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("No .sandcastle/ found");
+    }
   });
 
   it("docker build-image errors when .sandcastle/ is missing", async () => {

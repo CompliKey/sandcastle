@@ -36,6 +36,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
     expect(stdout).toContain("run-scenario");
+    expect(stdout).toContain("autopilot");
     expect(stdout).not.toContain("interactive");
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
@@ -64,6 +65,28 @@ describe("sandcastle CLI", () => {
     const { stdout } = await runCli("run-scenario --help", process.cwd());
     expect(stdout).toContain("<scenario>");
     expect(stdout).toContain("--config");
+  });
+
+  it("autopilot --help shows --scenario and --idle-poll-ms flags", async () => {
+    const { stdout } = await runCli("autopilot --help", process.cwd());
+    expect(stdout).toContain("--scenario");
+    expect(stdout).toContain("--idle-poll-ms");
+    expect(stdout).toContain("--config");
+  });
+
+  it("autopilot errors when .sandcastle/ is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    try {
+      await runCli("autopilot", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("No .sandcastle/ found");
+    }
   });
 
   it("run-scenario errors when .sandcastle/ is missing", async () => {

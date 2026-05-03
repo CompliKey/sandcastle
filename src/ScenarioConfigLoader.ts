@@ -32,6 +32,8 @@ export interface ScenarioMetadata {
   readonly name: string;
   readonly description?: string;
   readonly input: ScenarioInput;
+  /** Display-only iteration cap, surfaced in the live UI's metrics header. */
+  readonly maxIterations?: number;
 }
 
 export interface SandcastleConfigMetadata {
@@ -218,9 +220,24 @@ const validateScenario = (
       description = obj.description;
     }
 
+    let maxIterations: number | undefined;
+    if (obj.maxIterations !== undefined) {
+      if (
+        typeof obj.maxIterations !== "number" ||
+        !Number.isInteger(obj.maxIterations) ||
+        obj.maxIterations <= 0
+      ) {
+        return yield* fail(
+          `${where}: \`maxIterations\` must be a positive integer when provided.`,
+        );
+      }
+      maxIterations = obj.maxIterations;
+    }
+
     return {
       name,
       description,
       input: input as unknown as ScenarioInput,
+      maxIterations,
     };
   });

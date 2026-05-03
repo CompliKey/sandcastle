@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SandcastleEvent } from "./EventStore.js";
 import {
@@ -363,5 +363,126 @@ describe("SessionIndex rollups", () => {
     expect(
       idx.getRollups({ type: "ticket", ticketId: "T-MISSING" }),
     ).toBeUndefined();
+  });
+});
+
+describe("SessionIndex tool-result pairing", () => {
+  const toolCall = (
+    sessionId: string,
+    iteration: number,
+    toolUseId: string,
+    timestamp: number,
+  ): SandcastleEvent => ({
+    type: "agent.toolCall",
+    laneId: "main",
+    timestamp,
+    sessionId,
+    iteration,
+    toolUseId,
+    toolName: "Bash",
+    formattedArgs: '{"command":"ls"}',
+  });
+  const toolResult = (
+    sessionId: string,
+    iteration: number,
+    toolUseId: string,
+    result: string,
+    timestamp: number,
+    isError = false,
+  ): SandcastleEvent => ({
+    type: "agent.toolResult",
+    laneId: "main",
+    timestamp,
+    sessionId,
+    iteration,
+    toolUseId,
+    result,
+    isError,
+  });
+
+  it("pairs a tool result with its tool call by toolUseId", () => {
+    const idx = buildSessionIndex([
+      sessionStart("s1", "T-1", 100),
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 110,
+        sessionId: "s1",
+        iteration: 1,
+        startedAt: 110,
+      },
+      toolCall("s1", 1, "toolu_a", 120),
+      toolResult("s1", 1, "toolu_a", "ok\n", 130),
+    ]);
+    const view = idx.getSession("s1");
+    expect(view?.iterations[0]?.toolCalls).toHaveLength(1);
+    expect(view?.iterations[0]?.toolCalls[0]).toMatchObject({
+      toolName: "Bash",
+      result: "ok\n",
+      isError: false,
+    });
+  });
+
+  it("preserves a tool call when no matching result has arrived yet", () => {
+    const idx = buildSessionIndex([
+      sessionStart("s1", "T-1", 100),
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 110,
+        sessionId: "s1",
+        iteration: 1,
+        startedAt: 110,
+      },
+      toolCall("s1", 1, "toolu_a", 120),
+    ]);
+    const tc = idx.getSession("s1")?.iterations[0]?.toolCalls[0];
+    expect(tc?.toolName).toBe("Bash");
+    expect(tc?.result).toBeUndefined();
+  });
+
+  it("ignores a tool result whose toolUseId does not match any tool call", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const idx = buildSessionIndex([
+        sessionStart("s1", "T-1", 100),
+        {
+          type: "iteration.start",
+          laneId: "main",
+          timestamp: 110,
+          sessionId: "s1",
+          iteration: 1,
+          startedAt: 110,
+        },
+        toolCall("s1", 1, "toolu_a", 120),
+        toolResult("s1", 1, "toolu_orphan", "should be dropped", 130),
+      ]);
+      const tc = idx.getSession("s1")?.iterations[0]?.toolCalls[0];
+      expect(tc?.result).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("toolu_orphan"),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("flags an error result with isError=true", () => {
+    const idx = buildSessionIndex([
+      sessionStart("s1", "T-1", 100),
+      {
+        type: "iteration.start",
+        laneId: "main",
+        timestamp: 110,
+        sessionId: "s1",
+        iteration: 1,
+        startedAt: 110,
+      },
+      toolCall("s1", 1, "toolu_a", 120),
+      toolResult("s1", 1, "toolu_a", "command not found", 130, true),
+    ]);
+    const tc = idx.getSession("s1")?.iterations[0]?.toolCalls[0];
+    expect(tc?.isError).toBe(true);
+    expect(tc?.result).toBe("command not found");
   });
 });

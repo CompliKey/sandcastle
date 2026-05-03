@@ -7,8 +7,10 @@ import { createRequire } from "node:module";
 import { join, resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 
+import { createEventBroadcaster } from "./EventBroadcaster.js";
 import { createEventStore } from "./EventStore.js";
 import { createFailureCoordinator } from "./FailureCoordinator.js";
+import { startLiveEventBridge } from "./LiveEventBridge.js";
 import { runOrchestrationLoop } from "./OrchestrationLoop.js";
 import { runScenario } from "./ScenarioRunner.js";
 import { createSessionIndex } from "./SessionIndex.js";
@@ -703,6 +705,7 @@ const runScenarioCommand = Command.make(
             configPath: resolvePath(configPath),
             store,
             signal: ac.signal,
+            maxIterations: scenarioMeta?.maxIterations,
           }),
         catch: (err) =>
           new InitError({
@@ -842,6 +845,9 @@ const autopilotCommand = Command.make(
                 configPath: resolvePath(configPath),
                 store,
                 signal: ac.signal,
+                maxIterations: loaded.metadata.scenarios.find(
+                  (s) => s.name === args.scenario,
+                )?.maxIterations,
               }),
           }),
         catch: (err) =>
@@ -961,13 +967,18 @@ const uiCommand = Command.make(
         yield* Effect.promise(() => removeLockfile(stateDir));
       }
 
-      // 2. Replay the event log into a fresh SessionIndex.
+      // 2. Replay the event log into a fresh SessionIndex, recording the
+      //    final cursor so the live bridge can resume exactly there.
       const store = createEventStore({ dir: stateDir });
       const index = createSessionIndex();
-      yield* Effect.promise(async () => {
-        for await (const { event } of store.replay()) {
+      const broadcaster = createEventBroadcaster();
+      const replayCursor = yield* Effect.promise(async () => {
+        let cursor: undefined | { month: string; byteOffset: number };
+        for await (const { event, cursor: c } of store.replay()) {
           index.add(event);
+          cursor = c;
         }
+        return cursor;
       });
 
       const resolvedAssetsDir =
@@ -978,6 +989,7 @@ const uiCommand = Command.make(
         try: () =>
           startUiServer({
             index,
+            broadcaster,
             host: resolvedHost,
             port: resolvedPort,
             assetsDir: resolvedAssetsDir,
@@ -1014,6 +1026,17 @@ const uiCommand = Command.make(
       const onSignal = (): void => shutdownSignal.abort();
       process.once("SIGTERM", onSignal);
       process.once("SIGINT", onSignal);
+
+      // Bridge the on-disk event log into the broadcaster for live UX.
+      // The producer (autopilot, run-scenario, ...) lives in another process,
+      // so the disk is the bus.
+      const bridgeDone = startLiveEventBridge({
+        store,
+        index,
+        broadcaster,
+        signal: shutdownSignal.signal,
+        since: replayCursor,
+      });
       // SIGHUP fires when the controlling terminal closes — making the
       // foreground-binding contract explicit ("close the terminal, kill the
       // server") cross-platform.
@@ -1044,6 +1067,7 @@ const uiCommand = Command.make(
             process.removeListener("SIGINT", onSignal);
             process.removeListener("SIGHUP", onSignal);
             await server.close();
+            await bridgeDone;
             await store.close();
             await removeLockfile(stateDir);
           }),

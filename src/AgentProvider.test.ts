@@ -79,12 +79,97 @@ describe("claudeCode factory", () => {
       type: "assistant",
       message: {
         content: [
-          { type: "tool_use", name: "Bash", input: { command: "npm test" } },
+          {
+            type: "tool_use",
+            id: "toolu_01",
+            name: "Bash",
+            input: { command: "npm test" },
+          },
         ],
       },
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      { type: "tool_call", name: "Bash", args: "npm test" },
+      { type: "tool_call", id: "toolu_01", name: "Bash", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool_result block from a user message", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const line = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_01",
+            content: "PASS — 12 tests\n",
+            is_error: false,
+          },
+        ],
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "tool_result",
+        toolUseId: "toolu_01",
+        result: "PASS — 12 tests\n",
+        isError: false,
+      },
+    ]);
+  });
+
+  it("parseStreamLine joins array-of-blocks tool_result content", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const line = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_02",
+            content: [
+              { type: "text", text: "first chunk\n" },
+              { type: "text", text: "second chunk\n" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "tool_result",
+        toolUseId: "toolu_02",
+        result: "first chunk\nsecond chunk\n",
+        isError: false,
+      },
+    ]);
+  });
+
+  it("parseStreamLine surfaces is_error: true on tool_result", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const line = JSON.stringify({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_03",
+            content: "command not found",
+            is_error: true,
+          },
+        ],
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "tool_result",
+        toolUseId: "toolu_03",
+        result: "command not found",
+        isError: true,
+      },
     ]);
   });
 

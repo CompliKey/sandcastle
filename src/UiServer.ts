@@ -36,7 +36,9 @@ import {
   sep,
 } from "node:path";
 
+import type { EventBroadcaster } from "./EventBroadcaster.js";
 import type { SessionIndex } from "./SessionIndex.js";
+import { attachWebSocket } from "./WebSocket.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -44,6 +46,13 @@ import type { SessionIndex } from "./SessionIndex.js";
 
 export interface UiServerOptions {
   readonly index: SessionIndex;
+  /**
+   * Optional live-event broadcaster. When provided, `/ws` upgrades stream a
+   * snapshot of the requested session followed by every subsequent event the
+   * producer publishes for that session. When omitted, `/ws` accepts the
+   * upgrade and immediately closes (slice-7 behaviour).
+   */
+  readonly broadcaster?: EventBroadcaster;
   /**
    * Absolute path to the bundled frontend (e.g. `dist/ui`). When the
    * directory is missing, the server returns a small placeholder page —
@@ -107,17 +116,19 @@ export const startUiServer = async (
     });
   });
 
-  // WebSocket upgrades land here. Slice 7 only accepts the upgrade and
-  // closes immediately — slice 8 swaps in the real event broadcaster.
   server.on("upgrade", (req, socket) => {
-    if (!req.url || !req.url.startsWith("/ws")) {
+    if (!req.url) {
       socket.destroy();
       return;
     }
-    // Minimal RFC 6455 handshake response so a client `new WebSocket(...)` does
-    // not throw before slice 8 is wired up. We then immediately close the
-    // connection — no protocol framing yet.
-    socket.end();
+    // Match exactly /ws or /ws?... — startsWith("/ws") would also accept
+    // /wsanything, exposing nothing today but a foot-gun if the surface grows.
+    const path = req.url.split("?", 1)[0];
+    if (path !== "/ws") {
+      socket.destroy();
+      return;
+    }
+    handleWebSocketUpgrade(req, socket, opts.index, opts.broadcaster);
   });
 
   await listen(server, port, host);
@@ -155,6 +166,89 @@ const listen = (
     server.once("listening", onListening);
     server.listen(port, host);
   });
+
+// ---------------------------------------------------------------------------
+// WebSocket: live session feed
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle a `/ws?session=<id>` upgrade. On accept:
+ * 1. Send a single `{ type: "snapshot", view }` message reflecting current
+ *    `SessionIndex` state for the session. This bootstraps the client's view.
+ * 2. Subscribe to the broadcaster's `session:<id>` channel and forward each
+ *    matching event as `{ type: "event", event }`.
+ * If the session id is unknown, send `{ type: "error", reason: ... }` and
+ * close — the client decides whether to retry or fall back to REST.
+ *
+ * Without a broadcaster the upgrade is rejected (404 close); only the
+ * snapshot would be available, which the REST endpoint already provides.
+ */
+const handleWebSocketUpgrade = (
+  req: IncomingMessage,
+  socket: import("node:stream").Duplex,
+  index: SessionIndex,
+  broadcaster: EventBroadcaster | undefined,
+): void => {
+  const url = new URL(req.url ?? "/ws", "http://localhost");
+  const sessionId = url.searchParams.get("session");
+
+  const conn = attachWebSocket(req, socket);
+  if (!conn) return;
+
+  if (!broadcaster || !sessionId) {
+    conn.send(
+      JSON.stringify({
+        type: "error",
+        reason: !broadcaster
+          ? "live broadcaster not configured"
+          : "missing ?session= query parameter",
+      }),
+    );
+    // 4400 — application-level "bad request"; 1008 (Policy Violation) is
+    // semantically wrong for a missing query parameter.
+    conn.close(4400, "bad request");
+    return;
+  }
+
+  // Subscribe-then-snapshot-then-drain: we subscribe first and buffer any
+  // events that arrive before the snapshot is sent, then replay them after.
+  // This closes the snapshot/subscribe race — even if a future change adds
+  // an await between subscribe and getSession, no event published in that
+  // window can be silently lost. In the current synchronous code path the
+  // buffer is always empty, but the pattern is the safety net.
+  let snapshotSent = false;
+  const buffered: import("./EventStore.js").SandcastleEvent[] = [];
+  const unsubscribe = broadcaster.subscribe(
+    { type: "session", id: sessionId },
+    (event) => {
+      if (!snapshotSent) {
+        buffered.push(event);
+        return;
+      }
+      conn.send(JSON.stringify({ type: "event", event }));
+    },
+  );
+
+  const view = index.getSession(sessionId);
+  if (!view) {
+    unsubscribe();
+    conn.send(JSON.stringify({ type: "error", reason: "unknown session" }));
+    // 4404 — application-level "not found".
+    conn.close(4404, "unknown session");
+    return;
+  }
+
+  conn.send(JSON.stringify({ type: "snapshot", view }));
+  snapshotSent = true;
+  for (const event of buffered) {
+    conn.send(JSON.stringify({ type: "event", event }));
+  }
+  buffered.length = 0;
+
+  conn.onClose(() => {
+    unsubscribe();
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Single-instance protocol

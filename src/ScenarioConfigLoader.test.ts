@@ -72,6 +72,7 @@ describe("loadScenarioConfig", () => {
           scenarios: {
             "fix-bug": {
               description: "Fix a single bug ticket",
+              maxIterations: 10,
               input: { type: "single-ticket" },
               run: async () => {},
             },
@@ -91,11 +92,13 @@ describe("loadScenarioConfig", () => {
       name: "fix-bug",
       description: "Fix a single bug ticket",
       input: { type: "single-ticket" },
+      maxIterations: 10,
     });
     expect(result.scenarios[1]).toEqual({
       name: "review-pr",
       description: undefined,
       input: { type: "single-ticket" },
+      maxIterations: undefined,
     });
   });
 
@@ -276,6 +279,40 @@ describe("loadScenarioConfig", () => {
     await expectFailure(
       loadScenarioConfig(path),
       /description.* must be a string/,
+    );
+  });
+
+  it.each([
+    ["string", `"oops"`],
+    ["zero", `0`],
+    ["negative", `-1`],
+    ["non-integer", `1.5`],
+  ])("errors when maxIterations is %s", async (label, literal) => {
+    const path = writeFixture(
+      `bad-max-iterations-${label}.ts`,
+      `
+        import { defineSandcastle } from "${DEFINE_MODULE_URL}";
+        export default defineSandcastle({
+          backlogManager: {
+            listPending: async () => [],
+            getTicket: async () => ({}),
+            markErrored: async () => {},
+            clearErrored: async () => {},
+          },
+          scenarios: {
+            broken: {
+              // @ts-expect-error: invalid maxIterations for the test
+              maxIterations: ${literal},
+              input: { type: "single-ticket" },
+              run: async () => {},
+            },
+          },
+        });
+      `,
+    );
+    await expectFailure(
+      loadScenarioConfig(path),
+      /maxIterations.* must be a positive integer/,
     );
   });
 });

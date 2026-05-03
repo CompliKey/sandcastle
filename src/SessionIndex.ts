@@ -47,6 +47,10 @@ export interface SessionIterationView {
     readonly toolName: string;
     readonly formattedArgs: string;
     readonly timestamp: number;
+    readonly toolUseId?: string;
+    /** Set once a matching `agent.toolResult` event arrives (Claude Code only). */
+    readonly result?: string;
+    readonly isError?: boolean;
   }>;
   readonly texts: ReadonlyArray<{
     readonly text: string;
@@ -84,6 +88,12 @@ export interface SessionRollup {
   readonly iterationCount: number;
   /** `endedAt - startedAt` once the session has ended. */
   readonly wallTimeMs?: number;
+  /**
+   * Iteration cap propagated from `session.start`. Undefined when the
+   * producer didn't expose one — the UI then falls back to showing just
+   * the iteration count without "of N".
+   */
+  readonly maxIterations?: number;
 }
 
 export interface TicketRollup {
@@ -125,12 +135,21 @@ export interface SessionIndex {
 // Internals — mutable state, frozen on read
 // ---------------------------------------------------------------------------
 
+type ToolCallState = {
+  toolName: string;
+  formattedArgs: string;
+  timestamp: number;
+  toolUseId?: string;
+  result?: string;
+  isError?: boolean;
+};
+
 interface IterationState {
   iteration: number;
   startedAt?: number;
   endedAt?: number;
   usage?: EventIterationUsage;
-  toolCalls: SessionIterationView["toolCalls"][number][];
+  toolCalls: ToolCallState[];
   texts: SessionIterationView["texts"][number][];
   userLogs: SessionIterationView["userLogs"][number][];
 }
@@ -143,6 +162,7 @@ interface SessionState {
   startedAt: number;
   endedAt?: number;
   outcome?: SessionOutcome;
+  maxIterations?: number;
   iterations: Map<number, IterationState>;
   iterationOrder: number[];
   commits: SessionView["commits"][number][];
@@ -197,6 +217,7 @@ const buildSessionView = (s: SessionState): SessionView => {
     totalTokens,
     iterationCount: iterations.length,
     wallTimeMs,
+    maxIterations: s.maxIterations,
   };
   return {
     sessionId: s.sessionId,
@@ -249,6 +270,7 @@ export const createSessionIndex = (): SessionIndex => {
           scenario: event.scenario,
           laneId: event.laneId,
           startedAt: event.startedAt,
+          maxIterations: event.maxIterations,
           iterations: new Map(),
           iterationOrder: [],
           commits: [],
@@ -300,7 +322,31 @@ export const createSessionIndex = (): SessionIndex => {
           toolName: event.toolName,
           formattedArgs: event.formattedArgs,
           timestamp: event.timestamp,
+          toolUseId: event.toolUseId,
         });
+        return;
+      }
+      case "agent.toolResult": {
+        const s = sessions.get(event.sessionId);
+        if (!s) return;
+        const it = ensureIteration(s, event.iteration);
+        // Pair with the originating call by toolUseId. We search the most
+        // recent calls first since results typically follow their calls
+        // closely in time.
+        for (let i = it.toolCalls.length - 1; i >= 0; i--) {
+          const call = it.toolCalls[i]!;
+          if (call.toolUseId === event.toolUseId) {
+            call.result = event.result;
+            call.isError = event.isError;
+            return;
+          }
+        }
+        // Orphan — no matching call. This generally indicates a malformed
+        // or out-of-order Claude stream; warn so we can spot it in staging.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[SessionIndex] orphan agent.toolResult dropped: sessionId=${event.sessionId} iteration=${event.iteration} toolUseId=${event.toolUseId}`,
+        );
         return;
       }
       case "user.log": {

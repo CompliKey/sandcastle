@@ -147,6 +147,14 @@ export interface ScenarioDefinition<
 > {
   /** Optional human-readable summary, surfaced in the UI and `scenarios list`. */
   readonly description?: string;
+  /**
+   * Optional declared cap on iterations the scenario expects to run. When set,
+   * the live UI renders `iteration.length / maxIterations` (e.g. `3 / 10`) in
+   * the metrics header; when omitted, only the elapsed count is shown. Must be
+   * a positive integer. This is metadata for display only — the runtime cap on
+   * a single `ctx.run()` call is set on that call's own `maxIterations` arg.
+   */
+  readonly maxIterations?: number;
   /** Discriminated input — controls how the binary feeds work to this scenario. */
   readonly input: TInput;
   /** User-authored body. Receives a fully wired `ctx`. */

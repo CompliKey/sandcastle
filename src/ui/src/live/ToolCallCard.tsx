@@ -40,6 +40,7 @@ export const ToolCallCard = ({ toolCall }: ToolCallCardProps): ReactElement => {
         onClick={() => setCollapsed((c) => !c)}
         role="button"
         tabIndex={0}
+        aria-expanded={!collapsed}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

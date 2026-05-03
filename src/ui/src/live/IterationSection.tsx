@@ -54,6 +54,7 @@ export const IterationSection = ({
         onClick={() => setCollapsed((c) => !c)}
         role="button"
         tabIndex={0}
+        aria-expanded={!collapsed}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

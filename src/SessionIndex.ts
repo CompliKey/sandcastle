@@ -332,7 +332,7 @@ export const createSessionIndex = (): SessionIndex => {
         const it = ensureIteration(s, event.iteration);
         // Pair with the originating call by toolUseId. We search the most
         // recent calls first since results typically follow their calls
-        // closely in time. Orphan results (no matching call) are dropped.
+        // closely in time.
         for (let i = it.toolCalls.length - 1; i >= 0; i--) {
           const call = it.toolCalls[i]!;
           if (call.toolUseId === event.toolUseId) {
@@ -341,6 +341,12 @@ export const createSessionIndex = (): SessionIndex => {
             return;
           }
         }
+        // Orphan — no matching call. This generally indicates a malformed
+        // or out-of-order Claude stream; warn so we can spot it in staging.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[SessionIndex] orphan agent.toolResult dropped: sessionId=${event.sessionId} iteration=${event.iteration} toolUseId=${event.toolUseId}`,
+        );
         return;
       }
       case "user.log": {

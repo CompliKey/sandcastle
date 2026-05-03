@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SandcastleEvent } from "./EventStore.js";
 import {
@@ -442,21 +442,29 @@ describe("SessionIndex tool-result pairing", () => {
   });
 
   it("ignores a tool result whose toolUseId does not match any tool call", () => {
-    const idx = buildSessionIndex([
-      sessionStart("s1", "T-1", 100),
-      {
-        type: "iteration.start",
-        laneId: "main",
-        timestamp: 110,
-        sessionId: "s1",
-        iteration: 1,
-        startedAt: 110,
-      },
-      toolCall("s1", 1, "toolu_a", 120),
-      toolResult("s1", 1, "toolu_orphan", "should be dropped", 130),
-    ]);
-    const tc = idx.getSession("s1")?.iterations[0]?.toolCalls[0];
-    expect(tc?.result).toBeUndefined();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const idx = buildSessionIndex([
+        sessionStart("s1", "T-1", 100),
+        {
+          type: "iteration.start",
+          laneId: "main",
+          timestamp: 110,
+          sessionId: "s1",
+          iteration: 1,
+          startedAt: 110,
+        },
+        toolCall("s1", 1, "toolu_a", 120),
+        toolResult("s1", 1, "toolu_orphan", "should be dropped", 130),
+      ]);
+      const tc = idx.getSession("s1")?.iterations[0]?.toolCalls[0];
+      expect(tc?.result).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("toolu_orphan"),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("flags an error result with isError=true", () => {

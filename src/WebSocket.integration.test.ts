@@ -70,6 +70,23 @@ describe("attachWebSocket integration", () => {
     expect(received).toEqual(["from-client-1", "from-client-2"]);
   });
 
+  it("echoes the client-supplied close code on the server's close frame", async () => {
+    onConnection = () => {
+      // Server takes no initiative — wait for the client's close.
+    };
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await waitOpen(ws);
+    const closed = new Promise<{ code: number }>((resolve) => {
+      ws.addEventListener("close", (ev) => resolve({ code: ev.code }), {
+        once: true,
+      });
+    });
+    ws.close(4123, "client chosen");
+    const { code } = await closed;
+    expect(code).toBe(4123);
+  });
+
   it("server-initiated close fires onClose and the client sees the close event", async () => {
     let serverClosed = false;
     onConnection = (conn) => {

@@ -260,9 +260,15 @@ export const attachWebSocket = (
           }
           break;
         }
-        case 0x8: // close
-          finishClose(1000, "");
+        case 0x8: {
+          // Close frame. Per RFC 6455 §5.5.1, if the payload is present its
+          // first two bytes are a big-endian status code. Echo it back so
+          // the client's chosen code is preserved on the response close.
+          const echoCode =
+            parsed.payload.length >= 2 ? parsed.payload.readUInt16BE(0) : 1000;
+          finishClose(echoCode, "");
           return;
+        }
         case 0x9: // ping → pong
           writeRaw(encodePongFrame(parsed.payload));
           break;

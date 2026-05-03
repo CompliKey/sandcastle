@@ -31,7 +31,10 @@ import type {
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
-import { loadScenarioConfig } from "./ScenarioConfigLoader.js";
+import {
+  loadSandcastleConfig,
+  loadScenarioConfig,
+} from "./ScenarioConfigLoader.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -517,6 +520,80 @@ const scenariosCommand = Command.make("scenarios", {}, () =>
   }),
 ).pipe(Command.withSubcommands([scenariosListCommand]));
 
+// --- Queue commands ---
+
+const queueConfigOption = Options.file("config").pipe(
+  Options.withDescription(
+    `Path to the sandcastle config (default: ${DEFAULT_CONFIG_PATH})`,
+  ),
+  Options.optional,
+);
+
+const queueIncludeErroredOption = Options.boolean("include-errored").pipe(
+  Options.withDescription(
+    "Include tickets labelled `agent-error` (default: excluded).",
+  ),
+);
+
+const queueListCommand = Command.make(
+  "list",
+  {
+    config: queueConfigOption,
+    includeErrored: queueIncludeErroredOption,
+  },
+  ({ config, includeErrored }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const configPath =
+        config._tag === "Some" ? config.value : join(cwd, DEFAULT_CONFIG_PATH);
+
+      const loaded = yield* loadSandcastleConfig(configPath);
+      const tickets = yield* Effect.tryPromise({
+        try: () => loaded.backlogManager.listPending({ includeErrored }),
+        catch: (err) =>
+          new InitError({
+            message: `Failed to list pending tickets: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          }),
+      });
+
+      if (tickets.length === 0) {
+        yield* d.status("No pending tickets.", "info");
+        return;
+      }
+
+      const headerSuffix = includeErrored ? " (including errored)" : "";
+      yield* d.text(
+        styleText(
+          "bold",
+          `Pending tickets (${tickets.length})${headerSuffix}:`,
+        ),
+      );
+      for (const ticket of tickets) {
+        const labelText =
+          ticket.labels.length === 0
+            ? ""
+            : `  ${styleText("dim", `[${ticket.labels.join(", ")}]`)}`;
+        yield* d.text(
+          `  ${styleText("cyan", ticket.id)}  ${ticket.title}${labelText}`,
+        );
+        yield* d.text(`    ${styleText("dim", ticket.url)}`);
+      }
+    }),
+);
+
+const queueCommand = Command.make("queue", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Queue commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([queueListCommand]));
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -533,6 +610,7 @@ export const sandcastle = rootCommand.pipe(
     dockerCommand,
     podmanCommand,
     scenariosCommand,
+    queueCommand,
   ]),
 );
 

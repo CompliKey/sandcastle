@@ -53,6 +53,13 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("remove-image");
   });
 
+  it("queue list --help shows --include-errored and --config flags", async () => {
+    const { stdout } = await runCli("queue list --help", process.cwd());
+    expect(stdout).toContain("--include-errored");
+    expect(stdout).toContain("--config");
+    expect(stdout).toContain("agent-error");
+  });
+
   it("docker build-image errors when .sandcastle/ is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

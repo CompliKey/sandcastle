@@ -25,24 +25,79 @@ export interface ScenarioTicket {
 }
 
 /**
- * Host-side capability surface a backlog manager exposes to the sandcastle
- * binary. The binary uses these methods to drive autopilot lifecycle:
- *
- * - `listPending`: tickets the agent should pull next, excluding those already
- *   labelled `agent-error`.
- * - `getTicket`: hydrate a specific ticket by id.
- * - `markErrored`: tag a ticket as a ticket-level failure and post a comment.
- * - `clearErrored`: strip the `agent-error` label and post a retry comment.
- *
- * Concrete shapes (parameters, return types) are intentionally loose at this
- * slice — the JIRA implementation lands in a later slice and pins them down.
+ * A ticket as returned by `BacklogManagerHostInterface.listPending` and
+ * `getTicket`. Backlog-system-agnostic shape — JIRA, GitHub Issues, Linear,
+ * etc. all map onto it.
  */
-export interface BacklogManager {
-  readonly listPending: (...args: any[]) => any;
-  readonly getTicket: (...args: any[]) => any;
-  readonly markErrored: (...args: any[]) => any;
-  readonly clearErrored: (...args: any[]) => any;
+export interface BacklogTicket {
+  /** External ticket id, e.g. `"VGD-135"` for JIRA. */
+  readonly id: string;
+  /** Short single-line title. */
+  readonly title: string;
+  /** Full description / body in the source system's native format. */
+  readonly body: string;
+  /** All labels currently on the ticket, including `agent-error` if present. */
+  readonly labels: readonly string[];
+  /** Web URL for humans to open the ticket in a browser. */
+  readonly url: string;
+  /** Source-system priority name (e.g. `"Medium"`), if available. */
+  readonly priority?: string;
+  /** ISO-8601 creation timestamp, if available. */
+  readonly createdAt?: string;
+  /** ISO-8601 last-updated timestamp, if available. */
+  readonly updatedAt?: string;
 }
+
+/** Argument shape for `BacklogManagerHostInterface.markErrored`. */
+export interface MarkErroredArgs {
+  readonly id: string;
+  /**
+   * Short, structured failure summary (e.g. `"max iterations exceeded"`).
+   * Implementations include this verbatim in the posted comment so triage
+   * can grep for known reason strings.
+   */
+  readonly reason: string;
+  /**
+   * Optional additional human-readable context appended to the comment
+   * (stack trace excerpt, last agent message, etc.).
+   */
+  readonly comment?: string;
+}
+
+/** Argument shape for `BacklogManagerHostInterface.listPending`. */
+export interface ListPendingOptions {
+  /**
+   * When `true`, tickets labelled `agent-error` are included in the result.
+   * Default: `false` (autopilot must not re-pick known-bad tickets).
+   */
+  readonly includeErrored?: boolean;
+}
+
+/**
+ * Host-side capability surface a backlog manager exposes to the sandcastle
+ * binary. Lives in the host process — implementations call their backing
+ * system's REST API directly. Distinct from the in-sandbox CLI command shape
+ * (`jira-pickup`, `gh issue list`, etc.) which is set up by `init`.
+ *
+ * - `listPending`: tickets the agent should pull next; excludes tickets
+ *   labelled `agent-error` unless `options.includeErrored` is true.
+ * - `getTicket`: hydrate a specific ticket by id.
+ * - `markErrored`: apply the `agent-error` label and post a comment with the
+ *   failure reason and context. Does NOT transition status.
+ * - `clearErrored`: strip the `agent-error` label and post a retry comment.
+ */
+export interface BacklogManagerHostInterface {
+  listPending(options?: ListPendingOptions): Promise<readonly BacklogTicket[]>;
+  getTicket(id: string): Promise<BacklogTicket>;
+  markErrored(args: MarkErroredArgs): Promise<void>;
+  clearErrored(id: string): Promise<void>;
+}
+
+/**
+ * @deprecated Use `BacklogManagerHostInterface` directly. Kept as an alias for
+ * backward compatibility with Slice 1's loose placeholder contract.
+ */
+export type BacklogManager = BacklogManagerHostInterface;
 
 /** v1 scenario input variant: a single ticket pulled from the backlog. */
 export interface SingleTicketInput {
@@ -99,7 +154,7 @@ export interface ScenarioDefinition<
 }
 
 export interface SandcastleConfigInput {
-  readonly backlogManager: BacklogManager;
+  readonly backlogManager: BacklogManagerHostInterface;
   readonly scenarios: Record<string, ScenarioDefinition>;
 }
 

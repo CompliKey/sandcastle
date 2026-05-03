@@ -45,6 +45,10 @@ export {
 export { defineSandcastle, isSandcastleConfig } from "./defineSandcastle.js";
 export type {
   BacklogManager,
+  BacklogManagerHostInterface,
+  BacklogTicket,
+  ListPendingOptions,
+  MarkErroredArgs,
   SandcastleConfig,
   SandcastleConfigInput,
   ScenarioContext,
@@ -54,11 +58,17 @@ export type {
   ScenarioTicket,
   SingleTicketInput,
 } from "./defineSandcastle.js";
-export { loadScenarioConfig } from "./ScenarioConfigLoader.js";
+export {
+  loadSandcastleConfig,
+  loadScenarioConfig,
+} from "./ScenarioConfigLoader.js";
 export type {
+  LoadedSandcastleConfig,
   ScenarioMetadata,
   SandcastleConfigMetadata,
 } from "./ScenarioConfigLoader.js";
+export { createJiraBacklogManager } from "./JiraBacklogManager.js";
+export type { JiraBacklogManagerConfig } from "./JiraBacklogManager.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
 export { CwdError } from "./resolveCwd.js";

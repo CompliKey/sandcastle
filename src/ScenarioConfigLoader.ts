@@ -19,7 +19,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tsImport } from "tsx/esm/api";
 
-import { isSandcastleConfig, type ScenarioInput } from "./defineSandcastle.js";
+import {
+  isSandcastleConfig,
+  type BacklogManagerHostInterface,
+  type SandcastleConfig,
+  type ScenarioInput,
+} from "./defineSandcastle.js";
 import { ScenarioConfigError } from "./errors.js";
 
 /** Public metadata shape returned for each scenario. */
@@ -34,6 +39,19 @@ export interface SandcastleConfigMetadata {
 }
 
 /**
+ * Loaded config exposing the live `backlogManager` reference plus the
+ * validated scenarios object. Used by host-side commands (e.g. `queue list`)
+ * that need to invoke backlog-manager methods directly. Distinct from
+ * {@link SandcastleConfigMetadata}, which is a serializable summary suitable
+ * for `scenarios list`.
+ */
+export interface LoadedSandcastleConfig {
+  readonly backlogManager: BacklogManagerHostInterface;
+  readonly config: SandcastleConfig;
+  readonly metadata: SandcastleConfigMetadata;
+}
+
+/**
  * Currently the only valid `input.type`. Add new variants here in lockstep
  * with the `ScenarioInput` union in `defineSandcastle.ts`.
  */
@@ -43,14 +61,14 @@ const fail = (message: string) =>
   Effect.fail(new ScenarioConfigError({ message }));
 
 /**
- * Load and validate a sandcastle config.
- *
- * @param configPath  Path to the user's config (typically `.sandcastle/main.ts`).
- *                    Relative paths resolve against `process.cwd()`.
+ * Load and validate a sandcastle config, returning the live config plus the
+ * metadata summary. Used by host-side commands that need to invoke the
+ * backlog manager directly. {@link loadScenarioConfig} is a thin wrapper that
+ * discards the live config.
  */
-export const loadScenarioConfig = (
+export const loadSandcastleConfig = (
   configPath: string,
-): Effect.Effect<SandcastleConfigMetadata, ScenarioConfigError> =>
+): Effect.Effect<LoadedSandcastleConfig, ScenarioConfigError> =>
   Effect.gen(function* () {
     const absolute = resolve(configPath);
 
@@ -121,8 +139,25 @@ export const loadScenarioConfig = (
       metadata.push(yield* validateScenario(absolute, name, raw));
     }
 
-    return { scenarios: metadata };
+    return {
+      backlogManager: defaultExport.backlogManager,
+      config: defaultExport,
+      metadata: { scenarios: metadata },
+    };
   });
+
+/**
+ * Load and validate a sandcastle config, returning only the metadata summary.
+ *
+ * @param configPath  Path to the user's config (typically `.sandcastle/main.ts`).
+ *                    Relative paths resolve against `process.cwd()`.
+ */
+export const loadScenarioConfig = (
+  configPath: string,
+): Effect.Effect<SandcastleConfigMetadata, ScenarioConfigError> =>
+  loadSandcastleConfig(configPath).pipe(
+    Effect.map((loaded) => loaded.metadata),
+  );
 
 const validateScenario = (
   configPath: string,

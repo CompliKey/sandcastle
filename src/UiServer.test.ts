@@ -10,6 +10,10 @@ import type {
 } from "./defineSandcastle.js";
 import type { SandcastleEvent } from "./EventStore.js";
 import type { ScenarioRunResult } from "./ScenarioRunner.js";
+import type {
+  AutopilotController,
+  AutopilotState,
+} from "./AutopilotController.js";
 import {
   type RunScenarioRequestFn,
   type UiServer,
@@ -678,5 +682,336 @@ describe("UiServer — POST /api/run-scenario", () => {
       body: "not json",
     });
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Autopilot endpoints (VGD-144)
+// ---------------------------------------------------------------------------
+
+const fakeAutopilot = (
+  initial: AutopilotState = {
+    status: "off",
+    ticketsAttempted: 0,
+    ticketsCompleted: 0,
+    ticketsErrored: 0,
+  },
+): AutopilotController & {
+  startCalls: Array<{ scenario: string }>;
+  stopCalls: number;
+  resumeCalls: number;
+  setState: (next: AutopilotState) => void;
+} => {
+  let current = initial;
+  const startCalls: Array<{ scenario: string }> = [];
+  let stopCalls = 0;
+  let resumeCalls = 0;
+  return {
+    startCalls,
+    get stopCalls() {
+      return stopCalls;
+    },
+    get resumeCalls() {
+      return resumeCalls;
+    },
+    setState(next) {
+      current = next;
+    },
+    state: () => current,
+    start({ scenario }) {
+      startCalls.push({ scenario });
+      if (current.status === "on") {
+        return { ok: false, error: "already on", status: 409 };
+      }
+      current = { ...current, status: "on", scenario };
+      return { ok: true, state: current };
+    },
+    stop() {
+      stopCalls += 1;
+      current = { ...current, status: "off" };
+      return { ok: true, state: current };
+    },
+    resume() {
+      resumeCalls += 1;
+      if (current.status !== "halted") {
+        return { ok: false, error: "not halted", status: 409 };
+      }
+      current = { ...current, status: "on" };
+      return { ok: true, state: current };
+    },
+    async shutdown() {
+      /* noop */
+    },
+  };
+};
+
+describe("UiServer — autopilot endpoints", () => {
+  it("GET /api/autopilot returns 503 without a controller", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({ index, port: 0 });
+    const res = await fetch(`${server.url}/api/autopilot`);
+    expect(res.status).toBe(503);
+  });
+
+  it("GET /api/autopilot returns the current state", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot({
+      status: "halted",
+      scenario: "default",
+      haltReason: "infra failure",
+      haltKind: "infra-level",
+      ticketsAttempted: 4,
+      ticketsCompleted: 1,
+      ticketsErrored: 3,
+    });
+    server = await startUiServer({ index, port: 0, autopilot });
+    const res = await fetch(`${server.url}/api/autopilot`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { state: AutopilotState };
+    expect(body.state.status).toBe("halted");
+    expect(body.state.haltReason).toBe("infra failure");
+  });
+
+  it("POST /api/autopilot/start defaults to the only scenario when omitted", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot();
+    server = await startUiServer({
+      index,
+      port: 0,
+      autopilot,
+      scenarios: [{ name: "only-one" }],
+    });
+    const res = await fetch(`${server.url}/api/autopilot/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(202);
+    expect(autopilot.startCalls).toEqual([{ scenario: "only-one" }]);
+  });
+
+  it("POST /api/autopilot/start rejects when scenario is omitted but multiple exist", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot();
+    server = await startUiServer({
+      index,
+      port: 0,
+      autopilot,
+      scenarios: [{ name: "a" }, { name: "b" }],
+    });
+    const res = await fetch(`${server.url}/api/autopilot/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(400);
+    expect(autopilot.startCalls).toHaveLength(0);
+  });
+
+  it("POST /api/autopilot/start forwards the requested scenario", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot();
+    server = await startUiServer({
+      index,
+      port: 0,
+      autopilot,
+      scenarios: [{ name: "a" }, { name: "b" }],
+    });
+    const res = await fetch(`${server.url}/api/autopilot/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scenario: "b" }),
+    });
+    expect(res.status).toBe(202);
+    expect(autopilot.startCalls).toEqual([{ scenario: "b" }]);
+  });
+
+  it("POST /api/autopilot/stop transitions to off", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot({
+      status: "on",
+      scenario: "default",
+      ticketsAttempted: 0,
+      ticketsCompleted: 0,
+      ticketsErrored: 0,
+    });
+    server = await startUiServer({ index, port: 0, autopilot });
+    const res = await fetch(`${server.url}/api/autopilot/stop`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(autopilot.stopCalls).toBe(1);
+  });
+
+  it("POST /api/autopilot/resume returns 409 when not halted", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot({
+      status: "off",
+      ticketsAttempted: 0,
+      ticketsCompleted: 0,
+      ticketsErrored: 0,
+    });
+    server = await startUiServer({ index, port: 0, autopilot });
+    const res = await fetch(`${server.url}/api/autopilot/resume`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("POST /api/autopilot/resume returns 200 when halted", async () => {
+    const index = buildSessionIndex([]);
+    const autopilot = fakeAutopilot({
+      status: "halted",
+      scenario: "default",
+      haltReason: "x",
+      haltKind: "infra-level",
+      ticketsAttempted: 0,
+      ticketsCompleted: 0,
+      ticketsErrored: 0,
+    });
+    server = await startUiServer({ index, port: 0, autopilot });
+    const res = await fetch(`${server.url}/api/autopilot/resume`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(autopilot.resumeCalls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry endpoint (VGD-144)
+// ---------------------------------------------------------------------------
+
+describe("UiServer — POST /api/tickets/:id/retry", () => {
+  const startedFor = (sessionId: string) =>
+    Promise.resolve({
+      sessionId,
+      done: Promise.resolve<ScenarioRunResult>({
+        sessionId,
+        outcome: "done",
+        exitCode: 0,
+        signal: null,
+      }),
+    });
+
+  it("503s without a backlog manager", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({ index, port: 0 });
+    const res = await fetch(`${server.url}/api/tickets/VGD-1/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("503s with a backlog manager but no runScenario adapter", async () => {
+    const index = buildSessionIndex([]);
+    server = await startUiServer({
+      index,
+      port: 0,
+      backlogManager: fakeBacklogManager([]),
+    });
+    const res = await fetch(`${server.url}/api/tickets/VGD-1/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it("clears the errored label, then runs the scenario, then returns 202 with sessionId", async () => {
+    const index = buildSessionIndex([]);
+    const cleared: string[] = [];
+    const backlogManager: BacklogManagerHostInterface = {
+      listPending: async () => [],
+      getTicket: async () => ticket(),
+      markErrored: async () => {},
+      clearErrored: async (id) => {
+        cleared.push(id);
+      },
+    };
+    const runScenario = vi.fn<RunScenarioRequestFn>(() =>
+      startedFor("ses_retry"),
+    );
+    server = await startUiServer({
+      index,
+      port: 0,
+      backlogManager,
+      scenarios: [{ name: "default" }],
+      runScenario,
+    });
+
+    const res = await fetch(`${server.url}/api/tickets/VGD-118/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scenario: "default" }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { sessionId: string };
+    expect(body.sessionId).toBe("ses_retry");
+    expect(cleared).toEqual(["VGD-118"]);
+    expect(runScenario).toHaveBeenCalledWith({
+      scenario: "default",
+      ticketId: "VGD-118",
+    });
+  });
+
+  it("does NOT spawn a run when clearErrored fails — 502", async () => {
+    const index = buildSessionIndex([]);
+    const backlogManager: BacklogManagerHostInterface = {
+      listPending: async () => [],
+      getTicket: async () => ticket(),
+      markErrored: async () => {},
+      clearErrored: async () => {
+        throw new Error("jira down");
+      },
+    };
+    const runScenario = vi.fn<RunScenarioRequestFn>(() => startedFor("unused"));
+    server = await startUiServer({
+      index,
+      port: 0,
+      backlogManager,
+      scenarios: [{ name: "default" }],
+      runScenario,
+    });
+
+    const res = await fetch(`${server.url}/api/tickets/VGD-118/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scenario: "default" }),
+    });
+    expect(res.status).toBe(502);
+    expect(runScenario).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the only scenario when omitted", async () => {
+    const index = buildSessionIndex([]);
+    const backlogManager: BacklogManagerHostInterface = {
+      listPending: async () => [],
+      getTicket: async () => ticket(),
+      markErrored: async () => {},
+      clearErrored: async () => {},
+    };
+    const runScenario = vi.fn<RunScenarioRequestFn>(() =>
+      startedFor("ses_default"),
+    );
+    server = await startUiServer({
+      index,
+      port: 0,
+      backlogManager,
+      scenarios: [{ name: "only-one" }],
+      runScenario,
+    });
+    const res = await fetch(`${server.url}/api/tickets/VGD-7/retry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(202);
+    expect(runScenario).toHaveBeenCalledWith({
+      scenario: "only-one",
+      ticketId: "VGD-7",
+    });
   });
 });

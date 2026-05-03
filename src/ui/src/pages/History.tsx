@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent,
+  type ReactElement,
+} from "react";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-import { fetchSessions, type SessionView } from "../api.js";
+import { fetchSessions, retryTicket, type SessionView } from "../api.js";
 import { formatDuration, formatStartedAt, formatTokens } from "../format.js";
 
 type StatusFilter = "all" | "done" | "errored" | "halted";
@@ -26,11 +32,45 @@ const formatIterations = (s: SessionView): string =>
   // shows the count run so far, in the wireframe's "5 / —" shape.
   `${s.rollup.iterationCount} / —`;
 
+/** Pretty single-line summary of why an errored/halted session ended. */
+const errorDetail = (s: SessionView): string | null => {
+  if (s.outcome !== "errored" && s.outcome !== "halted") return null;
+  const last = s.errors[s.errors.length - 1];
+  if (last) return `${last.kind}: ${last.reason}`;
+  return s.outcome === "halted"
+    ? "autopilot halted"
+    : "agent error — see session detail";
+};
+
 export const HistoryPage = (): ReactElement => {
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const onRetry = async (
+    e: MouseEvent<HTMLButtonElement>,
+    s: SessionView,
+  ): Promise<void> => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (retryingId) return;
+    setRetryingId(s.ticketId);
+    setRetryError(null);
+    try {
+      const { sessionId } = await retryTicket(s.ticketId, {
+        scenario: s.scenario,
+      });
+      navigate(`/sessions/${encodeURIComponent(sessionId)}`);
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +166,16 @@ export const HistoryPage = (): ReactElement => {
           </div>
         )}
 
+        {retryError && (
+          <div
+            className="badge badge--error"
+            style={{ marginBottom: 16 }}
+            data-testid="retry-error"
+          >
+            Retry failed: {retryError}
+          </div>
+        )}
+
         {sessions === null && !error && (
           <p className="list-page__sub">Loading…</p>
         )}
@@ -149,48 +199,72 @@ export const HistoryPage = (): ReactElement => {
               <span />
             </header>
 
-            {visible.map((s) => (
-              <Link
-                to={`/sessions/${encodeURIComponent(s.sessionId)}`}
-                key={s.sessionId}
-                className={`session-row${s.outcome === "errored" || s.outcome === "halted" ? " session-row--errored" : ""}`}
-                role="row"
-              >
-                <span>{outcomeBadge(s.outcome)}</span>
-                <span className="session-row__ticket-cell">
-                  <span className="session-row__ticket">{s.ticketId}</span>
-                  <span className="session-row__title">{s.scenario}</span>
-                </span>
-                <span className="session-row__started">
-                  {formatStartedAt(s.startedAt)}
-                </span>
-                <span className="session-row__num">
-                  {formatDuration(s.rollup.wallTimeMs)}
-                </span>
-                <span className="session-row__num">{formatIterations(s)}</span>
-                <span className="session-row__num">{s.commits.length}</span>
-                <span className="session-row__num">
-                  {formatTokens(s.rollup.totalTokens)}
-                </span>
-                <span className="session-row__actions">
-                  <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                      <span
-                        className="btn btn--ghost"
-                        aria-label="Open session"
+            {visible.map((s) => {
+              const errored = s.outcome === "errored" || s.outcome === "halted";
+              const detail = errorDetail(s);
+              return (
+                <Link
+                  to={`/sessions/${encodeURIComponent(s.sessionId)}`}
+                  key={s.sessionId}
+                  className={`session-row${errored ? " session-row--errored" : ""}`}
+                  role="row"
+                  data-testid={`session-row-${s.ticketId}`}
+                >
+                  <span>{outcomeBadge(s.outcome)}</span>
+                  <span className="session-row__ticket-cell">
+                    <span className="session-row__ticket">{s.ticketId}</span>
+                    <span className="session-row__title">{s.scenario}</span>
+                  </span>
+                  <span className="session-row__started">
+                    {formatStartedAt(s.startedAt)}
+                  </span>
+                  <span className="session-row__num">
+                    {formatDuration(s.rollup.wallTimeMs)}
+                  </span>
+                  <span className="session-row__num">
+                    {formatIterations(s)}
+                  </span>
+                  <span className="session-row__num">{s.commits.length}</span>
+                  <span className="session-row__num">
+                    {formatTokens(s.rollup.totalTokens)}
+                  </span>
+                  <span className="session-row__actions">
+                    {errored && (
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        onClick={(e) => {
+                          void onRetry(e, s);
+                        }}
+                        disabled={retryingId === s.ticketId}
+                        data-testid={`retry-${s.ticketId}`}
+                        aria-label={`Retry ticket ${s.ticketId}`}
                       >
-                        ↗
-                      </span>
-                    </Tooltip.Trigger>
-                    <Tooltip.Portal>
-                      <Tooltip.Content className="tooltip">
-                        Open session detail
-                      </Tooltip.Content>
-                    </Tooltip.Portal>
-                  </Tooltip.Root>
-                </span>
-              </Link>
-            ))}
+                        {retryingId === s.ticketId ? "↻ …" : "↻ Retry"}
+                      </button>
+                    )}
+                    <Tooltip.Root>
+                      <Tooltip.Trigger asChild>
+                        <span
+                          className="btn btn--ghost"
+                          aria-label="Open session"
+                        >
+                          ↗
+                        </span>
+                      </Tooltip.Trigger>
+                      <Tooltip.Portal>
+                        <Tooltip.Content className="tooltip">
+                          Open session detail
+                        </Tooltip.Content>
+                      </Tooltip.Portal>
+                    </Tooltip.Root>
+                  </span>
+                  {errored && detail && (
+                    <span className="session-row__error-detail">{detail}</span>
+                  )}
+                </Link>
+              );
+            })}
           </section>
         )}
       </main>

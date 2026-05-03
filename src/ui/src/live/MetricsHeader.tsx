@@ -74,7 +74,7 @@ export const MetricsHeader = ({
         <span className="metric__value">
           {formatTokens({
             input: t.input,
-            output: t.output,
+            output: 0,
             cacheCreation: 0,
             cacheRead: 0,
           })}

@@ -117,7 +117,14 @@ export const startUiServer = async (
   });
 
   server.on("upgrade", (req, socket) => {
-    if (!req.url || !req.url.startsWith("/ws")) {
+    if (!req.url) {
+      socket.destroy();
+      return;
+    }
+    // Match exactly /ws or /ws?... — startsWith("/ws") would also accept
+    // /wsanything, exposing nothing today but a foot-gun if the surface grows.
+    const path = req.url.split("?", 1)[0];
+    if (path !== "/ws") {
       socket.destroy();
       return;
     }
@@ -197,7 +204,9 @@ const handleWebSocketUpgrade = (
           : "missing ?session= query parameter",
       }),
     );
-    conn.close(1008, "bad request");
+    // 4400 — application-level "bad request"; 1008 (Policy Violation) is
+    // semantically wrong for a missing query parameter.
+    conn.close(4400, "bad request");
     return;
   }
 
@@ -224,7 +233,8 @@ const handleWebSocketUpgrade = (
   if (!view) {
     unsubscribe();
     conn.send(JSON.stringify({ type: "error", reason: "unknown session" }));
-    conn.close(1008, "unknown session");
+    // 4404 — application-level "not found".
+    conn.close(4404, "unknown session");
     return;
   }
 

@@ -7,6 +7,7 @@ import { CommitDiffPage } from "./pages/CommitDiff.js";
 import { HistoryPage } from "./pages/History.js";
 import { QueuePage } from "./pages/Queue.js";
 import { SessionDetailPage } from "./pages/SessionDetail.js";
+import { TicketDetailPage } from "./pages/TicketDetail.js";
 
 export const App = (): ReactElement => (
   <AutopilotProvider>
@@ -14,6 +15,7 @@ export const App = (): ReactElement => (
       <Routes>
         <Route path="/" element={<HistoryPage />} />
         <Route path="/queue" element={<QueuePage />} />
+        <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
         <Route path="/sessions/:id" element={<SessionDetailPage />} />
         <Route
           path="/sessions/:sessionId/commits/:sha/diff"

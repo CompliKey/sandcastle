@@ -8,6 +8,22 @@ export const formatDuration = (ms: number | undefined): string => {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 
+/**
+ * Long-duration variant for ticket-level rollups (time-to-close, total wall
+ * time across many sessions). Renders hh:mm:ss when the duration crosses an
+ * hour, otherwise mm:ss to match {@link formatDuration}.
+ */
+export const formatLongDuration = (ms: number | undefined): string => {
+  if (ms === undefined) return "—";
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  if (hours === 0) return `${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+};
+
 export const formatStartedAt = (ms: number): string => {
   const d = new Date(ms);
   // YYYY-MM-DD HH:MM in local time, matches the wireframes.
